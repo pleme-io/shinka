@@ -1,0 +1,90 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shinka
+  labels:
+    app.kubernetes.io/name: shinka
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/part-of: shinka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shinka
+      app.kubernetes.io/component: operator
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shinka
+        app.kubernetes.io/component: operator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: shinka
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: shinka
+          image: ghcr.io/pleme-io/shinka:latest
+          imagePullPolicy: Always
+          ports:
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: "info,shinka=debug"
+            - name: LOG_FORMAT
+              value: "json"
+            - name: HEALTH_ADDR
+              value: "0.0.0.0:8080"
+            - name: DEFAULT_MIGRATION_TIMEOUT
+              value: "300"
+            - name: DEFAULT_MAX_RETRIES
+              value: "3"
+            - name: SHINKA_CONFIG
+              value: "/etc/shinka/config.yaml"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/shinka
+              readOnly: true
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 2
+      volumes:
+        - name: config
+          configMap:
+            name: shinka-config
+            optional: true
+      terminationGracePeriodSeconds: 30

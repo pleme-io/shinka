@@ -1,0 +1,327 @@
+// Shinka (進化) - Database Migration Operator gRPC API
+//
+// This API provides programmatic access to migration status and control,
+// enabling applications to verify migration completion before rollout.
+
+syntax = "proto3";
+
+package shinka.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// =============================================================================
+// Migration Service - Primary API for migration operations
+// =============================================================================
+
+service MigrationService {
+  // Get a specific migration by name
+  rpc GetMigration(GetMigrationRequest) returns (Migration);
+
+  // List all migrations, optionally filtered
+  rpc ListMigrations(ListMigrationsRequest) returns (ListMigrationsResponse);
+
+  // Watch for migration status changes (streaming)
+  rpc WatchMigrations(WatchMigrationsRequest) returns (stream MigrationEvent);
+
+  // Get migration history for a resource
+  rpc GetMigrationHistory(GetMigrationHistoryRequest) returns (MigrationHistoryResponse);
+
+  // Trigger a migration retry (for failed migrations)
+  rpc RetryMigration(RetryMigrationRequest) returns (Migration);
+
+  // Cancel a running migration
+  rpc CancelMigration(CancelMigrationRequest) returns (Migration);
+}
+
+// =============================================================================
+// Database Service - Database health and readiness
+// =============================================================================
+
+service DatabaseService {
+  // Check if a database is ready (healthy + migrations complete)
+  rpc CheckDatabaseReady(CheckDatabaseReadyRequest) returns (DatabaseReadyResponse);
+
+  // Get CNPG cluster health status
+  rpc GetClusterHealth(GetClusterHealthRequest) returns (ClusterHealthResponse);
+
+  // List all monitored databases
+  rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse);
+}
+
+// =============================================================================
+// Queue Service - Migration queue management
+// =============================================================================
+
+service QueueService {
+  // Get current queue status
+  rpc GetQueueStatus(GetQueueStatusRequest) returns (QueueStatusResponse);
+
+  // List items in the queue
+  rpc ListQueueItems(ListQueueItemsRequest) returns (ListQueueItemsResponse);
+
+  // Pause the migration queue
+  rpc PauseQueue(PauseQueueRequest) returns (QueueStatusResponse);
+
+  // Resume the migration queue
+  rpc ResumeQueue(ResumeQueueRequest) returns (QueueStatusResponse);
+}
+
+// =============================================================================
+// Message Types
+// =============================================================================
+
+// Migration represents a DatabaseMigration resource
+message Migration {
+  // Metadata
+  string name = 1;
+  string namespace = 2;
+  string uid = 3;
+  google.protobuf.Timestamp created_at = 4;
+
+  // Spec summary
+  MigrationSpec spec = 5;
+
+  // Status
+  MigrationStatus status = 6;
+
+  // Conditions
+  repeated Condition conditions = 7;
+}
+
+message MigrationSpec {
+  // Database reference
+  string cnpg_cluster = 1;
+  string database = 2;
+
+  // Migrator settings
+  string migrator_type = 3;
+  string deployment_ref = 4;
+  repeated string command = 5;
+
+  // Safety settings
+  bool require_healthy_cluster = 6;
+  int32 max_retries = 7;
+
+  // Timeouts
+  google.protobuf.Duration migration_timeout = 8;
+}
+
+message MigrationStatus {
+  // Phase: Pending, CheckingHealth, WaitingForDatabase, Migrating, Ready, Failed
+  string phase = 1;
+
+  // Last migration details
+  LastMigration last_migration = 2;
+
+  // Current retry count
+  int32 retry_count = 3;
+
+  // Current job name (if running)
+  string current_job = 4;
+
+  // Observed generation
+  int64 observed_generation = 5;
+}
+
+message LastMigration {
+  string image_tag = 1;
+  bool success = 2;
+  google.protobuf.Duration duration = 3;
+  google.protobuf.Timestamp completed_at = 4;
+  string error = 5;
+}
+
+message Condition {
+  string type = 1;
+  string status = 2;  // "True", "False", "Unknown"
+  string reason = 3;
+  string message = 4;
+  google.protobuf.Timestamp last_transition_time = 5;
+  int64 observed_generation = 6;
+}
+
+// =============================================================================
+// Request/Response Messages
+// =============================================================================
+
+// GetMigration
+message GetMigrationRequest {
+  string namespace = 1;
+  string name = 2;
+}
+
+// ListMigrations
+message ListMigrationsRequest {
+  // Optional namespace filter (empty = all namespaces)
+  string namespace = 1;
+
+  // Optional label selector
+  map<string, string> label_selector = 2;
+
+  // Phase filter
+  repeated string phases = 3;
+
+  // Pagination
+  int32 limit = 4;
+  string continue_token = 5;
+}
+
+message ListMigrationsResponse {
+  repeated Migration migrations = 1;
+  string continue_token = 2;
+  int32 total_count = 3;
+}
+
+// WatchMigrations
+message WatchMigrationsRequest {
+  // Optional namespace filter
+  string namespace = 1;
+
+  // Optional name filter (watch specific migration)
+  string name = 2;
+
+  // Only watch specific phases
+  repeated string phases = 3;
+}
+
+message MigrationEvent {
+  // Event type: ADDED, MODIFIED, DELETED
+  string event_type = 1;
+
+  // The migration object
+  Migration migration = 2;
+
+  // Timestamp of the event
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+// GetMigrationHistory
+message GetMigrationHistoryRequest {
+  string namespace = 1;
+  string name = 2;
+  int32 limit = 3;  // Max history entries to return
+}
+
+message MigrationHistoryResponse {
+  repeated MigrationHistoryEntry entries = 1;
+}
+
+message MigrationHistoryEntry {
+  string image_tag = 1;
+  bool success = 2;
+  google.protobuf.Timestamp started_at = 3;
+  google.protobuf.Timestamp completed_at = 4;
+  google.protobuf.Duration duration = 5;
+  string error = 6;
+  int32 retry_count = 7;
+  string job_name = 8;
+}
+
+// RetryMigration
+message RetryMigrationRequest {
+  string namespace = 1;
+  string name = 2;
+  bool reset_retry_count = 3;  // Reset retry count to 0
+}
+
+// CancelMigration
+message CancelMigrationRequest {
+  string namespace = 1;
+  string name = 2;
+  string reason = 3;
+}
+
+// CheckDatabaseReady
+message CheckDatabaseReadyRequest {
+  string namespace = 1;
+  string cluster_name = 2;
+  string database = 3;  // Optional, check specific database
+}
+
+message DatabaseReadyResponse {
+  bool ready = 1;
+  bool cluster_healthy = 2;
+  bool migrations_complete = 3;
+  string message = 4;
+
+  // Pending migrations for this database
+  repeated string pending_migrations = 5;
+
+  // In-progress migrations
+  repeated string active_migrations = 6;
+}
+
+// GetClusterHealth
+message GetClusterHealthRequest {
+  string namespace = 1;
+  string cluster_name = 2;
+}
+
+message ClusterHealthResponse {
+  bool healthy = 1;
+  string phase = 2;  // CNPG cluster phase
+  int32 ready_replicas = 3;
+  int32 total_replicas = 4;
+  string primary_pod = 5;
+  google.protobuf.Timestamp last_check = 6;
+  string message = 7;
+}
+
+// ListDatabases
+message ListDatabasesRequest {
+  string namespace = 1;
+}
+
+message ListDatabasesResponse {
+  repeated DatabaseInfo databases = 1;
+}
+
+message DatabaseInfo {
+  string namespace = 1;
+  string cluster_name = 2;
+  string database = 3;
+  bool healthy = 4;
+  int32 pending_migrations = 5;
+  int32 completed_migrations = 6;
+  google.protobuf.Timestamp last_migration = 7;
+}
+
+// Queue operations
+message GetQueueStatusRequest {}
+
+message QueueStatusResponse {
+  bool paused = 1;
+  int32 pending = 2;
+  int32 active = 3;
+  int32 completed = 4;
+  int32 failed = 5;
+  int32 max_concurrent = 6;
+  string strategy = 7;  // FIFO, Priority, Fair, ShortestFirst
+}
+
+message ListQueueItemsRequest {
+  // Filter by status: pending, active, completed, failed
+  string status = 1;
+  int32 limit = 2;
+}
+
+message ListQueueItemsResponse {
+  repeated QueueItem items = 1;
+}
+
+message QueueItem {
+  string namespace = 1;
+  string name = 2;
+  string status = 3;
+  int32 priority = 4;
+  google.protobuf.Timestamp enqueued_at = 5;
+  google.protobuf.Timestamp started_at = 6;
+  string database = 7;
+}
+
+message PauseQueueRequest {
+  string reason = 1;
+}
+
+message ResumeQueueRequest {}

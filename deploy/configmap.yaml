@@ -1,0 +1,131 @@
+---
+# Shinka Operator Configuration
+# This ConfigMap provides the default configuration for all migration types.
+# Customize per-environment using Kustomize overlays.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shinka-config
+  labels:
+    app.kubernetes.io/name: shinka
+    app.kubernetes.io/component: config
+    app.kubernetes.io/part-of: shinka
+data:
+  config.yaml: |
+    # Shinka (進化) Configuration
+    # GitOps-native database migration operator
+    apiVersion: shinka.pleme.io/v1alpha1
+
+    # Operator settings
+    operator:
+      # Namespace to watch (empty = all namespaces)
+      # watchNamespace: ""
+
+      # Health server address
+      healthAddr: "0.0.0.0:8080"
+
+      # Metrics port
+      metricsPort: 9090
+
+      # Default migration timeout in seconds
+      defaultMigrationTimeoutSeconds: 300
+
+      # Default max retries for failed migrations
+      defaultMaxRetries: 3
+
+      # Requeue interval in seconds when idle
+      requeueIntervalSeconds: 60
+
+      # Log level (trace, debug, info, warn, error)
+      logLevel: info
+
+      # Log format (json, pretty)
+      logFormat: json
+
+    # Parallelization settings
+    parallelization:
+      # Enable parallel migrations for independent databases
+      enabled: true
+
+      # Maximum concurrent migrations across all databases
+      maxConcurrent: 10
+
+      # Maximum concurrent migrations per database (prevents conflicts)
+      maxPerDatabase: 1
+
+      # Queue strategy: fifo, priority, or fair
+      queueStrategy: fair
+
+    # Migrator defaults for each supported tool
+    migrators:
+      # Default migrator type if not specified in DatabaseMigration
+      defaultType: sqlx
+
+      # Global environment variables applied to all migrators
+      globalEnv: {}
+
+      # Default resources for migration jobs
+      defaultResources:
+        memoryLimit: "256Mi"
+        cpuLimit: "500m"
+        memoryRequest: "128Mi"
+        cpuRequest: "100m"
+
+      # Per-type default configurations
+      types:
+        # SQLx (Rust) - compile-time verified SQL migrations
+        sqlx:
+          migrationsPath: "migrations"
+          toolConfig:
+            sqlxEmbedded: true
+
+        # Refinery (Rust) - flexible SQL/Rust migrations
+        refinery:
+          migrationsPath: "migrations"
+
+        # Diesel (Rust) - ORM with migration support
+        diesel:
+          migrationsPath: "migrations"
+          toolConfig:
+            dieselMigrationDir: "migrations"
+
+        # Goose (Go) - SQL and Go-based migrations
+        goose:
+          migrationsPath: "db/migrations"
+          toolConfig:
+            gooseDriver: "postgres"
+            gooseTable: "goose_db_version"
+
+        # golang-migrate (Go) - language-agnostic migrations
+        golang-migrate:
+          migrationsPath: "migrations"
+          toolConfig:
+            migrateLockTimeout: 15
+
+        # Atlas (Go) - declarative schema migrations
+        atlas:
+          migrationsPath: "migrations"
+          toolConfig:
+            atlasSchema: "public"
+
+        # Dbmate (Go) - simple multi-database migrations
+        dbmate:
+          migrationsPath: "db/migrations"
+          toolConfig:
+            dbmateMigrationsTable: "schema_migrations"
+            dbmateNoDumpSchema: false
+
+        # Flyway (Java) - enterprise migration tool
+        flyway:
+          migrationsPath: "sql"
+          toolConfig:
+            flywaySchemas:
+              - public
+            flywayCleanDisabled: true
+
+        # Liquibase (Java) - enterprise changelog migrations
+        liquibase:
+          migrationsPath: "changelog"
+          toolConfig:
+            liquibaseChangelogFile: "changelog.xml"
+            liquibaseDefaultSchema: "public"

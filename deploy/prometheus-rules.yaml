@@ -1,0 +1,189 @@
+---
+# PrometheusRules for Shinka database migration operator
+# Defines alert conditions for migration failures and operator health
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shinka-alerts
+  namespace: shinka-system
+  labels:
+    app.kubernetes.io/name: shinka
+    app.kubernetes.io/component: operator
+    prometheus: main
+spec:
+  groups:
+    - name: shinka.availability
+      interval: 30s
+      rules:
+        # Operator availability
+        - alert: ShinkaOperatorDown
+          expr: up{job="shinka"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: shinka
+          annotations:
+            summary: "Shinka migration operator is down"
+            description: "Shinka operator has been unreachable for more than 2 minutes. Database migrations will not run."
+            runbook: "Check shinka-system namespace for pod issues"
+
+        # Reconciliation failures
+        - alert: ShinkaReconciliationFailing
+          expr: increase(shinka_reconciliations_total{result="failed"}[10m]) > 5
+          for: 5m
+          labels:
+            severity: warning
+            service: shinka
+          annotations:
+            summary: "Shinka reconciliation failures detected"
+            description: "More than 5 reconciliation failures in the last 10 minutes."
+
+    - name: shinka.migrations
+      interval: 30s
+      rules:
+        # Migration failed
+        - alert: ShinkaMigrationFailed
+          expr: shinka_migrations_total{status="failed"} > 0
+          for: 1m
+          labels:
+            severity: critical
+            service: shinka
+          annotations:
+            summary: "Database migration failed: {{ $labels.name }}"
+            description: "Migration {{ $labels.name }} in namespace {{ $labels.namespace }} has failed. Check migration logs for details."
+            runbook: "kubectl logs -n {{ $labels.namespace }} -l job-type=migration"
+
+        # Migration taking too long
+        - alert: ShinkaMigrationSlow
+          expr: shinka_migration_duration_seconds{quantile="0.99"} > 300
+          for: 5m
+          labels:
+            severity: warning
+            service: shinka
+          annotations:
+            summary: "Migration running slowly: {{ $labels.name }}"
+            description: "Migration {{ $labels.name }} P99 duration exceeds 5 minutes."
+
+        # High migration queue depth
+        - alert: ShinkaQueueBacklog
+          expr: shinka_queue_depth > 10
+          for: 10m
+          labels:
+            severity: warning
+            service: shinka
+          annotations:
+            summary: "Migration queue backlog detected"
+            description: "More than 10 migrations waiting in queue for over 10 minutes."
+
+        # Migrations in flight for too long
+        - alert: ShinkaMigrationsStuck
+          expr: shinka_parallel_migrations_active > 0 and increase(shinka_migrations_total[30m]) == 0
+          for: 30m
+          labels:
+            severity: warning
+            service: shinka
+          annotations:
+            summary: "Migrations appear stuck"
+            description: "Active migrations present but no completions in 30 minutes."
+
+    - name: shinka.database
+      interval: 60s
+      rules:
+        # Database unhealthy
+        - alert: ShinkaDatabaseUnhealthy
+          expr: shinka_database_health == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: shinka
+          annotations:
+            summary: "Database cluster unhealthy: {{ $labels.cluster }}"
+            description: "CNPG cluster {{ $labels.cluster }} in namespace {{ $labels.namespace }} is not healthy. Migrations are blocked."
+
+    - name: shinka.errors
+      interval: 30s
+      rules:
+        # High error rate
+        - alert: ShinkaHighErrorRate
+          expr: sum(rate(shinka_errors_total[5m])) by (category) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            service: shinka
+          annotations:
+            summary: "High error rate in Shinka: {{ $labels.category }}"
+            description: "Error category {{ $labels.category }} is seeing elevated error rates."
+
+    - name: shinka.checksum
+      interval: 30s
+      rules:
+        # Checksum mismatch detected (any mode)
+        - alert: ShinkaChecksumMismatch
+          expr: increase(shinka_checksum_mismatches_total[10m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+            service: shinka
+          annotations:
+            summary: "Checksum mismatch detected: {{ $labels.name }}"
+            description: "Migration {{ $labels.name }} (version {{ $labels.version }}) in namespace {{ $labels.namespace }} has a checksum mismatch. Outcome: {{ $labels.outcome }}. This indicates a migration file was modified after being applied."
+            runbook: "Check migration file history. If intentional, use idempotent migration patterns. If accidental, roll forward with a new migration."
+
+        # Strict mode rejection (critical - blocking deployments)
+        - alert: ShinkaStrictModeRejection
+          expr: increase(shinka_checksum_mismatches_total{outcome="strict_rejected"}[10m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            service: shinka
+          annotations:
+            summary: "Migration blocked by strict mode: {{ $labels.name }}"
+            description: "Migration {{ $labels.name }} (version {{ $labels.version }}) in namespace {{ $labels.namespace }} was BLOCKED due to checksum mismatch in strict mode. Deployments are halted until resolved."
+            runbook: "Create a new corrective migration. Never modify applied migrations. If rollback is needed, deploy previous image."
+
+        # Pre-flight validation failure
+        - alert: ShinkaPreFlightFailed
+          expr: increase(shinka_checksum_mismatches_total{outcome="preflight_blocked"}[10m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            service: shinka
+          annotations:
+            summary: "Pre-flight validation failed: {{ $labels.name }}"
+            description: "Pre-flight validation found checksum issues for migration {{ $labels.name }} (version {{ $labels.version }}) in namespace {{ $labels.namespace }}. Migration was blocked before execution."
+            runbook: "Investigate migration file changes. All existing migrations must match their recorded checksums."
+
+        # High reconciliation rate (potential systemic issue)
+        - alert: ShinkaHighReconciliationRate
+          expr: sum(increase(shinka_checksum_reconciliations_total[1h])) > 5
+          for: 5m
+          labels:
+            severity: warning
+            service: shinka
+          annotations:
+            summary: "High checksum reconciliation rate detected"
+            description: "More than 5 checksum reconciliations in the past hour. This may indicate a systemic issue with migration file management."
+            runbook: "Review migration file modification patterns. Consider enabling strict or pre-flight mode."
+
+        # Migration rollback occurred
+        - alert: ShinkaMigrationRollback
+          expr: increase(shinka_migration_rollbacks_total[10m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+            service: shinka
+          annotations:
+            summary: "Migration rollback: {{ $labels.name }}"
+            description: "Migration {{ $labels.name }} in namespace {{ $labels.namespace }} was rolled back. Reason: {{ $labels.reason }}."
+            runbook: "Check migration logs and database state. Ensure migrations are idempotent."
+
+        # Checksum mode changed (informational)
+        - alert: ShinkaChecksumModeChanged
+          expr: changes(shinka_checksum_mode[5m]) > 0
+          for: 0m
+          labels:
+            severity: info
+            service: shinka
+          annotations:
+            summary: "Checksum mode changed for {{ $labels.name }}"
+            description: "Checksum mode for migration {{ $labels.name }} in namespace {{ $labels.namespace }} has been modified."

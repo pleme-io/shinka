@@ -1,0 +1,38 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: shinka
+  labels:
+    app.kubernetes.io/name: shinka
+    app.kubernetes.io/component: operator
+rules:
+  # Own CRD
+  - apiGroups: ["shinka.pleme.io"]
+    resources: ["databasemigrations", "databasemigrations/status"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+
+  # Watch Deployments for image changes
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+
+  # CNPG health checks
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters", "clusters/status"]
+    verbs: ["get", "list", "watch"]
+
+  # Create and manage migration Jobs
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # Read secrets and configmaps for migration job env
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list"]
+
+  # Emit Events for migration lifecycle
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]

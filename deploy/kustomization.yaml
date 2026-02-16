@@ -1,0 +1,52 @@
+# Shinka (進化) - GitOps-native Database Migration Operator
+# Use this as a base for your Kustomize overlays
+#
+# Example usage with FluxCD:
+#   apiVersion: kustomize.toolkit.fluxcd.io/v1
+#   kind: Kustomization
+#   spec:
+#     sourceRef:
+#       kind: GitRepository
+#       name: flux-system
+#     path: ./pkgs/platform/shinka/deploy
+#     prune: true
+#     interval: 10m
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: shinka-system
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: shinka
+      app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - namespace.yaml
+  - crds/shinka.pleme.io_databasemigrations.yaml
+  - rbac/serviceaccount.yaml
+  - rbac/role.yaml
+  - rbac/rolebinding.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - servicemonitor.yaml
+  - prometheus-rules.yaml
+  - grafana-dashboard.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: shinka
+  app.kubernetes.io/version: "0.1.0"
+
+# Image customization
+images:
+  - name: ghcr.io/pleme-io/shinka
+    newTag: latest
+
+# Configuration generation from files
+configMapGenerator: []
+
+# Patches for customization
+patches: []

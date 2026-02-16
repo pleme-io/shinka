@@ -1,0 +1,434 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: databasemigrations.shinka.pleme.io
+  labels:
+    app.kubernetes.io/name: shinka
+    app.kubernetes.io/component: crd
+spec:
+  group: shinka.pleme.io
+  names:
+    kind: DatabaseMigration
+    listKind: DatabaseMigrationList
+    plural: databasemigrations
+    singular: databasemigration
+    shortNames:
+      - dbm
+      - migration
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - database
+              description: |
+                DatabaseMigration spec. Either `migrator` (single) or `migrators` (multiple)
+                must be provided. If both are specified, `migrators` takes precedence.
+              properties:
+                database:
+                  type: object
+                  required:
+                    - cnpgClusterRef
+                  properties:
+                    cnpgClusterRef:
+                      type: object
+                      required:
+                        - name
+                      properties:
+                        name:
+                          type: string
+                          description: Name of the CNPG Cluster
+                        database:
+                          type: string
+                          description: Database name within the cluster
+                migrator:
+                  type: object
+                  description: Single migrator configuration (for backward compatibility)
+                  required:
+                    - deploymentRef
+                  properties:
+                    name:
+                      type: string
+                      description: Optional name for identification in logs and status
+                    type:
+                      type: string
+                      description: |
+                        Migration tool type. Supported: sqlx, seaorm, refinery, diesel,
+                        goose, golang-migrate, atlas, dbmate, flyway, liquibase, custom
+                      enum:
+                        - sqlx
+                        - seaorm
+                        - refinery
+                        - diesel
+                        - goose
+                        - golang-migrate
+                        - atlas
+                        - dbmate
+                        - flyway
+                        - liquibase
+                        - custom
+                      default: sqlx
+                    imageOverride:
+                      type: string
+                      description: Override the container image directly, bypassing deploymentRef lookup
+                    deploymentRef:
+                      type: object
+                      required:
+                        - name
+                      properties:
+                        name:
+                          type: string
+                          description: Name of the deployment
+                        containerName:
+                          type: string
+                          description: Container name to get the image from
+                    command:
+                      type: array
+                      items:
+                        type: string
+                      description: Command to run for migration (overrides default for type)
+                    args:
+                      type: array
+                      items:
+                        type: string
+                      description: Optional arguments
+                    workingDir:
+                      type: string
+                      description: Working directory for migration command
+                    migrationsPath:
+                      type: string
+                      description: Path to migrations directory
+                    env:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: Environment variables to set (key-value pairs)
+                    envFrom:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          configMapRef:
+                            type: object
+                            required:
+                              - name
+                            properties:
+                              name:
+                                type: string
+                          secretRef:
+                            type: object
+                            required:
+                              - name
+                            properties:
+                              name:
+                                type: string
+                    resources:
+                      type: object
+                      properties:
+                        memoryLimit:
+                          type: string
+                        cpuLimit:
+                          type: string
+                        memoryRequest:
+                          type: string
+                        cpuRequest:
+                          type: string
+                    serviceAccountName:
+                      type: string
+                      description: Service account for migration jobs
+                    toolConfig:
+                      type: object
+                      description: Tool-specific configuration options
+                      properties:
+                        sqlxSource:
+                          type: string
+                          description: SQLx source (path or fixtures)
+                        sqlxIgnoreMissing:
+                          type: boolean
+                          description: SQLx ignore missing migrations
+                        sqlxDryRun:
+                          type: boolean
+                          description: SQLx dry run mode
+                        seaormMigrationDir:
+                          type: string
+                          description: SeaORM migration directory
+                        seaormSchema:
+                          type: string
+                          description: SeaORM schema name
+                        seaormSteps:
+                          type: integer
+                          description: Number of migrations to run
+                        seaormVerbose:
+                          type: boolean
+                          description: Enable verbose output
+                migrators:
+                  type: array
+                  description: |
+                    Ordered list of migrators to run sequentially. Each migrator runs in order.
+                    By default, if any migrator fails, subsequent migrators are not executed.
+                    Set safety.continueOnFailure to true to continue despite failures.
+                  items:
+                    type: object
+                    required:
+                      - deploymentRef
+                    properties:
+                      name:
+                        type: string
+                        description: Optional name for identification in logs and status
+                      type:
+                        type: string
+                        description: Migration tool type
+                        enum:
+                          - sqlx
+                          - seaorm
+                          - refinery
+                          - diesel
+                          - goose
+                          - golang-migrate
+                          - atlas
+                          - dbmate
+                          - flyway
+                          - liquibase
+                          - custom
+                        default: sqlx
+                      imageOverride:
+                        type: string
+                        description: Override the container image directly, bypassing deploymentRef lookup
+                      deploymentRef:
+                        type: object
+                        required:
+                          - name
+                        properties:
+                          name:
+                            type: string
+                            description: Name of the deployment
+                          containerName:
+                            type: string
+                            description: Container name to get the image from
+                      command:
+                        type: array
+                        items:
+                          type: string
+                        description: Command to run for migration
+                      args:
+                        type: array
+                        items:
+                          type: string
+                        description: Optional arguments
+                      workingDir:
+                        type: string
+                        description: Working directory for migration command
+                      migrationsPath:
+                        type: string
+                        description: Path to migrations directory
+                      env:
+                        type: object
+                        additionalProperties:
+                          type: string
+                        description: Environment variables
+                      envFrom:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            configMapRef:
+                              type: object
+                              required:
+                                - name
+                              properties:
+                                name:
+                                  type: string
+                            secretRef:
+                              type: object
+                              required:
+                                - name
+                              properties:
+                                name:
+                                  type: string
+                      resources:
+                        type: object
+                        properties:
+                          memoryLimit:
+                            type: string
+                          cpuLimit:
+                            type: string
+                          memoryRequest:
+                            type: string
+                          cpuRequest:
+                            type: string
+                      serviceAccountName:
+                        type: string
+                        description: Service account for migration jobs
+                      toolConfig:
+                        type: object
+                        description: Tool-specific configuration options
+                        properties:
+                          sqlxSource:
+                            type: string
+                          sqlxIgnoreMissing:
+                            type: boolean
+                          sqlxDryRun:
+                            type: boolean
+                          seaormMigrationDir:
+                            type: string
+                          seaormSchema:
+                            type: string
+                          seaormSteps:
+                            type: integer
+                          seaormVerbose:
+                            type: boolean
+                safety:
+                  type: object
+                  properties:
+                    requireHealthyCluster:
+                      type: boolean
+                      default: true
+                    maxRetries:
+                      type: integer
+                      default: 3
+                    checksumMode:
+                      type: string
+                      description: |
+                        How to handle migration checksum mismatches:
+                        - auto-reconcile (default): Automatically fix checksum mismatches
+                        - strict: Fail immediately if checksum doesn't match
+                        - pre-flight: Validate all checksums BEFORE running any migrations
+                      enum:
+                        - auto-reconcile
+                        - strict
+                        - pre-flight
+                      default: auto-reconcile
+                    continueOnFailure:
+                      type: boolean
+                      default: false
+                      description: |
+                        Continue running subsequent migrators even if one fails.
+                        When using multiple migrators, this controls what happens when a migrator fails:
+                        - false (default): Stop immediately on the first failure
+                        - true: Continue running remaining migrators
+                timeouts:
+                  type: object
+                  properties:
+                    migration:
+                      type: string
+                      default: "5m"
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - CheckingHealth
+                    - WaitingForDatabase
+                    - Migrating
+                    - Ready
+                    - Failed
+                lastMigration:
+                  type: object
+                  properties:
+                    imageTag:
+                      type: string
+                    success:
+                      type: boolean
+                    duration:
+                      type: string
+                    completedAt:
+                      type: string
+                      format: date-time
+                    error:
+                      type: string
+                retryCount:
+                  type: integer
+                currentJob:
+                  type: string
+                jobStartedAt:
+                  type: string
+                  format: date-time
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                observedGeneration:
+                  type: integer
+                  format: int64
+                # Multi-migrator status fields
+                currentMigratorIndex:
+                  type: integer
+                  description: Index of the currently running migrator (0-based)
+                currentMigratorName:
+                  type: string
+                  description: Name of the currently running migrator
+                totalMigrators:
+                  type: integer
+                  description: Total number of migrators to run
+                migratorResults:
+                  type: array
+                  description: Results of each migrator execution
+                  items:
+                    type: object
+                    properties:
+                      index:
+                        type: integer
+                      name:
+                        type: string
+                      migratorType:
+                        type: string
+                      success:
+                        type: boolean
+                      duration:
+                        type: string
+                      completedAt:
+                        type: string
+                        format: date-time
+                      error:
+                        type: string
+                      jobName:
+                        type: string
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Last Image
+          type: string
+          jsonPath: .status.lastMigration.imageTag
+        - name: Success
+          type: boolean
+          jsonPath: .status.lastMigration.success
+        - name: Migrators
+          type: integer
+          jsonPath: .status.totalMigrators
+          priority: 1
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
