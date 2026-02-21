@@ -1,0 +1,8 @@
+# Shinka - GitOps-native database migration operator for Kubernetes
+name: shinka
+
+release:
+  services:
+    - name: shinka
+      type: rust
+      path: .
