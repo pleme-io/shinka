@@ -15,16 +15,16 @@
 //! apiVersion: shinka.pleme.io/v1alpha1
 //! kind: MigrationRun
 //! metadata:
-//!   name: lilitu-backend-run-abc123
-//!   namespace: lilitu-staging
+//!   name: myapp-backend-run-abc123
+//!   namespace: myapp-staging
 //!   ownerReferences:
 //!     - apiVersion: shinka.pleme.io/v1alpha1
 //!       kind: DatabaseMigration
-//!       name: lilitu-backend
+//!       name: myapp-backend
 //!       uid: xxx-xxx-xxx
 //! spec:
 //!   migrationRef:
-//!     name: lilitu-backend
+//!     name: myapp-backend
 //!   imageTag: "sha256:abc123def456"
 //!   attempt: 1
 //! status:
@@ -32,7 +32,7 @@
 //!   startedAt: "2026-01-17T10:00:00Z"
 //!   completedAt: "2026-01-17T10:00:30Z"
 //!   duration: "30s"
-//!   jobName: "lilitu-backend-migration-abc12345"
+//!   jobName: "myapp-backend-migration-abc12345"
 //!   message: "Migration completed successfully"
 //! ```
 
@@ -232,37 +232,14 @@ impl MigrationRun {
     }
 }
 
-/// Helper to format duration as human-readable string
-pub fn format_duration(seconds: u64) -> String {
-    if seconds < 60 {
-        format!("{}s", seconds)
-    } else if seconds < 3600 {
-        let mins = seconds / 60;
-        let secs = seconds % 60;
-        if secs == 0 {
-            format!("{}m", mins)
-        } else {
-            format!("{}m {}s", mins, secs)
-        }
-    } else {
-        let hours = seconds / 3600;
-        let mins = (seconds % 3600) / 60;
-        format!("{}h {}m", hours, mins)
-    }
-}
+/// Helper to format duration as human-readable string.
+///
+/// Re-exported from [`crate::util::format_duration`].
+pub use crate::util::format_duration;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_format_duration() {
-        assert_eq!(format_duration(30), "30s");
-        assert_eq!(format_duration(60), "1m");
-        assert_eq!(format_duration(90), "1m 30s");
-        assert_eq!(format_duration(3600), "1h 0m");
-        assert_eq!(format_duration(3720), "1h 2m");
-    }
 
     #[test]
     fn test_phase_display() {

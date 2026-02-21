@@ -60,6 +60,8 @@ use crate::{
 pub struct WebhookConfig {
     /// Whether the webhook is enabled
     pub enabled: bool,
+    /// Bind address (default: 0.0.0.0)
+    pub bind_addr: String,
     /// Port to listen on
     pub port: u16,
     /// Path to TLS certificate
@@ -74,6 +76,7 @@ impl Default for WebhookConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            bind_addr: "0.0.0.0".to_string(),
             port: 8443,
             cert_path: None,
             key_path: None,
@@ -89,6 +92,10 @@ impl WebhookConfig {
 
         if let Ok(val) = std::env::var("WEBHOOK_ENABLED") {
             config.enabled = val == "true" || val == "1";
+        }
+
+        if let Ok(addr) = std::env::var("WEBHOOK_BIND_ADDR") {
+            config.bind_addr = addr;
         }
 
         if let Ok(port) = std::env::var("WEBHOOK_PORT") {
@@ -421,29 +428,47 @@ pub async fn serve(config: WebhookConfig, client: Client) -> Result<()> {
         return Ok(());
     }
 
-    let addr = format!("0.0.0.0:{}", config.port);
+    let addr = format!("{}:{}", config.bind_addr, config.port);
     let router = create_router(client, &config);
 
     tracing::info!(
         addr = %addr,
         fail_open = %config.fail_open,
+        tls = config.cert_path.is_some() && config.key_path.is_some(),
         "Starting webhook server"
     );
 
-    // Check if TLS is configured
-    if config.cert_path.is_some() && config.key_path.is_some() {
-        tracing::info!("TLS enabled for webhook server");
-        // Note: In production, you'd use axum-server with rustls here
-        // For now, we'll use plain HTTP and rely on a service mesh or ingress for TLS
+    // Use TLS if certificate and key are configured (required for K8s admission webhooks)
+    if let (Some(cert_path), Some(key_path)) = (&config.cert_path, &config.key_path) {
+        tracing::info!(
+            cert_path = %cert_path,
+            key_path = %key_path,
+            "TLS enabled for webhook server"
+        );
+
+        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
+            .await
+            .map_err(|e| crate::Error::Internal(format!("Failed to load TLS config: {}", e)))?;
+
+        let addr: std::net::SocketAddr = addr
+            .parse()
+            .map_err(|e| crate::Error::Internal(format!("Invalid bind address: {}", e)))?;
+
+        axum_server::bind_rustls(addr, tls_config)
+            .serve(router.into_make_service())
+            .await
+            .map_err(|e| crate::Error::Internal(format!("Webhook TLS server error: {}", e)))?;
+    } else {
+        tracing::warn!("Webhook server running without TLS - not suitable for K8s admission webhooks in production");
+
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
+            .map_err(|e| crate::Error::Internal(format!("Failed to bind webhook server: {}", e)))?;
+
+        axum::serve(listener, router)
+            .await
+            .map_err(|e| crate::Error::Internal(format!("Webhook server error: {}", e)))?;
     }
-
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .map_err(|e| crate::Error::Internal(format!("Failed to bind webhook server: {}", e)))?;
-
-    axum::serve(listener, router)
-        .await
-        .map_err(|e| crate::Error::Internal(format!("Webhook server error: {}", e)))?;
 
     Ok(())
 }

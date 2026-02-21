@@ -48,6 +48,14 @@ pub struct MigrationJobConfig {
     pub trace_context: Option<TraceContext>,
     /// Pod scheduling constraints inherited from the referenced deployment
     pub scheduling: PodScheduling,
+    /// TTL in seconds for completed Jobs (Kubernetes garbage collection)
+    pub job_ttl_seconds: i32,
+    /// Whether to inject mesh sidecar disable annotation
+    pub disable_mesh_sidecar: bool,
+    /// Annotation key for disabling mesh sidecar (e.g., "sidecar.istio.io/inject")
+    pub mesh_sidecar_annotation_key: String,
+    /// Annotation value for disabling mesh sidecar (e.g., "false")
+    pub mesh_sidecar_annotation_value: String,
 }
 
 /// Pod scheduling constraints to inherit from the referenced deployment.
@@ -104,11 +112,16 @@ pub fn build_migration_job(
         "shinka.pleme.io/migrator-type".to_string(),
         config.migrator_type.to_string(),
     );
-    // Disable Istio sidecar injection for migration jobs
+    // Optionally disable service mesh sidecar injection for migration jobs.
     // Migration pods are short-lived and don't need service mesh traffic management.
     // This prevents race conditions where the migration container starts before
-    // the Istio proxy is ready, causing "connection reset by peer" errors.
-    annotations.insert("sidecar.istio.io/inject".to_string(), "false".to_string());
+    // the mesh proxy is ready, causing "connection reset by peer" errors.
+    if config.disable_mesh_sidecar {
+        annotations.insert(
+            config.mesh_sidecar_annotation_key.clone(),
+            config.mesh_sidecar_annotation_value.clone(),
+        );
+    }
 
     // Build resource requirements
     let resources = config.resources.map(|r| {
@@ -251,7 +264,7 @@ pub fn build_migration_job(
             spec: Some(pod_spec),
         },
         backoff_limit: Some(0), // No retries at Job level (we handle retries)
-        ttl_seconds_after_finished: Some(3600), // Clean up after 1 hour
+        ttl_seconds_after_finished: Some(config.job_ttl_seconds),
         ..Default::default()
     };
 

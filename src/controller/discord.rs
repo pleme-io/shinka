@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use super::webhook::MigrationEventType;
 use crate::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
+use crate::util;
 
 /// Discord embed colors (decimal RGB values)
 mod colors {
@@ -172,31 +173,31 @@ pub struct DiscordConfig {
     pub environment: String,
 
     /// Enable notifications for successful migrations
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::util::default_true")]
     pub notify_on_success: bool,
 
     /// Enable notifications for failed migrations
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::util::default_true")]
     pub notify_on_failure: bool,
 
     /// Enable notifications for started migrations
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::util::default_true")]
     pub notify_on_started: bool,
 
     /// Enable notifications for auto-retries
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::util::default_true")]
     pub notify_on_retry: bool,
 
     /// Enable notifications for health check events
-    #[serde(default = "default_false")]
+    #[serde(default = "crate::util::default_false")]
     pub notify_on_health: bool,
 
     /// Enable notifications for checksum safety events (mismatches, reconciliations, pre-flight)
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::util::default_true")]
     pub notify_on_checksum: bool,
 
     /// Enable notifications for release detection events
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::util::default_true")]
     pub notify_on_release: bool,
 
     /// Mention role ID for failures (e.g., "1234567890")
@@ -229,6 +230,46 @@ impl Default for DiscordConfig {
     }
 }
 
+impl DiscordConfig {
+    /// Check if a given event type should trigger a notification.
+    pub fn should_notify(&self, event_type: &MigrationEventType) -> bool {
+        match event_type {
+            MigrationEventType::Started => self.notify_on_started,
+            MigrationEventType::Succeeded => self.notify_on_success,
+            MigrationEventType::Failed => self.notify_on_failure,
+            MigrationEventType::AutoRetried => self.notify_on_retry,
+            MigrationEventType::HealthCheckPassed | MigrationEventType::HealthCheckFailed => {
+                self.notify_on_health
+            }
+            MigrationEventType::ChecksumMismatch
+            | MigrationEventType::ChecksumReconciled
+            | MigrationEventType::PreFlightFailed => self.notify_on_checksum,
+            MigrationEventType::ReleaseDetected => self.notify_on_release,
+        }
+    }
+
+    /// Build Discord mention string for failure events.
+    ///
+    /// Returns `None` when no mentions are configured.
+    pub fn build_failure_mentions(&self) -> Option<String> {
+        let mut mentions = Vec::new();
+
+        if let Some(role_id) = &self.failure_mention_role {
+            mentions.push(format!("<@&{}>", role_id));
+        }
+
+        for user_id in &self.failure_mention_users {
+            mentions.push(format!("<@{}>", user_id));
+        }
+
+        if mentions.is_empty() {
+            None
+        } else {
+            Some(mentions.join(" "))
+        }
+    }
+}
+
 fn default_username() -> String {
     "Shinka".to_string()
 }
@@ -239,14 +280,6 @@ fn default_cluster() -> String {
 
 fn default_environment() -> String {
     "unknown".to_string()
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_false() -> bool {
-    false
 }
 
 /// Operator lifecycle event types
@@ -373,7 +406,7 @@ impl DiscordClient {
             },
             DiscordField {
                 name: "Image Tag".to_string(),
-                value: format!("`{}`", truncate_tag(image_tag, 40)),
+                value: format!("`{}`", util::truncate_tag(image_tag, 40)),
                 inline: true,
             },
         ];
@@ -382,7 +415,7 @@ impl DiscordClient {
         if let Some(secs) = duration_secs {
             fields.push(DiscordField {
                 name: "Duration".to_string(),
-                value: format_duration(secs),
+                value: format!("`{}`", util::format_duration(secs)),
                 inline: true,
             });
         }
@@ -400,7 +433,7 @@ impl DiscordClient {
         if let Some(prev_tag) = previous_image_tag {
             fields.push(DiscordField {
                 name: "Previous Tag".to_string(),
-                value: format!("`{}`", truncate_tag(prev_tag, 40)),
+                value: format!("`{}`", util::truncate_tag(prev_tag, 40)),
                 inline: true,
             });
         }
@@ -409,7 +442,7 @@ impl DiscordClient {
         if let Some(expected) = embed_ctx.expected_release_tag {
             fields.push(DiscordField {
                 name: "Release Deployment".to_string(),
-                value: format!("Awaiting `{}`", truncate_tag(expected, 40)),
+                value: format!("Awaiting `{}`", util::truncate_tag(expected, 40)),
                 inline: true,
             });
         }
@@ -418,7 +451,7 @@ impl DiscordClient {
             if embed_ctx.expected_release_tag.is_some() {
                 fields.push(DiscordField {
                     name: "Deployment Tag".to_string(),
-                    value: format!("`{}`", truncate_tag(current, 40)),
+                    value: format!("`{}`", util::truncate_tag(current, 40)),
                     inline: true,
                 });
             }
@@ -493,22 +526,7 @@ impl DiscordClient {
         retry_count: Option<u32>,
         previous_image_tag: Option<&str>,
     ) -> Result<(), String> {
-        // Check if this event type should be notified
-        let should_notify = match event_type {
-            MigrationEventType::Started => self.config.notify_on_started,
-            MigrationEventType::Succeeded => self.config.notify_on_success,
-            MigrationEventType::Failed => self.config.notify_on_failure,
-            MigrationEventType::AutoRetried => self.config.notify_on_retry,
-            MigrationEventType::HealthCheckPassed | MigrationEventType::HealthCheckFailed => {
-                self.config.notify_on_health
-            }
-            MigrationEventType::ChecksumMismatch
-            | MigrationEventType::ChecksumReconciled
-            | MigrationEventType::PreFlightFailed => self.config.notify_on_checksum,
-            MigrationEventType::ReleaseDetected => self.config.notify_on_release,
-        };
-
-        if !should_notify {
+        if !self.config.should_notify(&event_type) {
             tracing::debug!(
                 namespace = %namespace,
                 name = %name,
@@ -531,23 +549,8 @@ impl DiscordClient {
             &EmbedContext::default(),
         );
 
-        // Build mention content for failures
         let content = if matches!(event_type, MigrationEventType::Failed) {
-            let mut mentions = Vec::new();
-
-            if let Some(role_id) = &self.config.failure_mention_role {
-                mentions.push(format!("<@&{}>", role_id));
-            }
-
-            for user_id in &self.config.failure_mention_users {
-                mentions.push(format!("<@{}>", user_id));
-            }
-
-            if mentions.is_empty() {
-                None
-            } else {
-                Some(mentions.join(" "))
-            }
+            self.config.build_failure_mentions()
         } else {
             None
         };
@@ -606,117 +609,27 @@ impl DiscordClient {
         retry_count: Option<u32>,
         previous_image_tag: Option<&str>,
     ) {
-        // Check if this event type should be notified
-        let should_notify = match event_type {
-            MigrationEventType::Started => self.config.notify_on_started,
-            MigrationEventType::Succeeded => self.config.notify_on_success,
-            MigrationEventType::Failed => self.config.notify_on_failure,
-            MigrationEventType::AutoRetried => self.config.notify_on_retry,
-            MigrationEventType::HealthCheckPassed | MigrationEventType::HealthCheckFailed => {
-                self.config.notify_on_health
-            }
-            MigrationEventType::ChecksumMismatch
-            | MigrationEventType::ChecksumReconciled
-            | MigrationEventType::PreFlightFailed => self.config.notify_on_checksum,
-            MigrationEventType::ReleaseDetected => self.config.notify_on_release,
-        };
-
-        if !should_notify {
-            tracing::debug!(
+        if let Err(e) = self
+            .notify_with_result(
+                event_type.clone(),
+                namespace,
+                name,
+                deployment,
+                image_tag,
+                message,
+                duration_secs,
+                retry_count,
+                previous_image_tag,
+            )
+            .await
+        {
+            tracing::warn!(
                 namespace = %namespace,
                 name = %name,
                 event_type = ?event_type,
-                "Discord notification skipped (disabled by config)"
+                error = %e,
+                "Discord notification failed"
             );
-            return;
-        }
-
-        let embed = self.build_embed(
-            &event_type,
-            namespace,
-            name,
-            deployment,
-            image_tag,
-            message,
-            duration_secs,
-            retry_count,
-            previous_image_tag,
-            &EmbedContext::default(),
-        );
-
-        // Build mention content for failures
-        let content = if matches!(event_type, MigrationEventType::Failed) {
-            let mut mentions = Vec::new();
-
-            if let Some(role_id) = &self.config.failure_mention_role {
-                mentions.push(format!("<@&{}>", role_id));
-            }
-
-            for user_id in &self.config.failure_mention_users {
-                mentions.push(format!("<@{}>", user_id));
-            }
-
-            if mentions.is_empty() {
-                None
-            } else {
-                Some(mentions.join(" "))
-            }
-        } else {
-            None
-        };
-
-        let webhook = DiscordWebhook {
-            username: Some(self.config.username.clone()),
-            avatar_url: self.config.avatar_url.clone(),
-            content,
-            embeds: vec![embed],
-        };
-
-        tracing::debug!(
-            namespace = %namespace,
-            name = %name,
-            event_type = ?event_type,
-            "Sending Discord notification"
-        );
-
-        match self
-            .client
-            .post(&self.webhook_url)
-            .json(&webhook)
-            .send()
-            .await
-        {
-            Ok(response) => {
-                if response.status().is_success() {
-                    tracing::debug!(
-                        namespace = %namespace,
-                        name = %name,
-                        event_type = ?event_type,
-                        "Discord notification sent successfully"
-                    );
-                } else {
-                    let status = response.status();
-                    let body = response.text().await.unwrap_or_default();
-                    tracing::warn!(
-                        namespace = %namespace,
-                        name = %name,
-                        event_type = ?event_type,
-                        status = %status,
-                        body = %body,
-                        "Discord webhook returned non-success status"
-                    );
-                }
-            }
-            Err(e) => {
-                // Log but don't fail - webhook is optional
-                tracing::warn!(
-                    namespace = %namespace,
-                    name = %name,
-                    event_type = ?event_type,
-                    error = %e,
-                    "Failed to send Discord notification"
-                );
-            }
         }
     }
 
@@ -1145,56 +1058,9 @@ impl OptionalDiscordClient {
     }
 }
 
-/// Truncate a tag to max length with ellipsis
-fn truncate_tag(tag: &str, max_len: usize) -> String {
-    if tag.len() <= max_len {
-        tag.to_string()
-    } else {
-        format!("{}...", &tag[..max_len - 3])
-    }
-}
-
-/// Format duration in human-readable format
-fn format_duration(secs: u64) -> String {
-    if secs < 60 {
-        format!("`{}s`", secs)
-    } else if secs < 3600 {
-        let mins = secs / 60;
-        let remaining_secs = secs % 60;
-        if remaining_secs == 0 {
-            format!("`{}m`", mins)
-        } else {
-            format!("`{}m {}s`", mins, remaining_secs)
-        }
-    } else {
-        let hours = secs / 3600;
-        let mins = (secs % 3600) / 60;
-        format!("`{}h {}m`", hours, mins)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_truncate_tag() {
-        assert_eq!(truncate_tag("short", 10), "short");
-        assert_eq!(truncate_tag("sha256:abc123def456", 10), "sha256:...");
-        assert_eq!(
-            truncate_tag("v1.2.3-abc123def456ghi789", 20),
-            "v1.2.3-abc123def4..."
-        );
-    }
-
-    #[test]
-    fn test_format_duration() {
-        assert_eq!(format_duration(45), "`45s`");
-        assert_eq!(format_duration(60), "`1m`");
-        assert_eq!(format_duration(90), "`1m 30s`");
-        assert_eq!(format_duration(3600), "`1h 0m`");
-        assert_eq!(format_duration(3720), "`1h 2m`");
-    }
 
     #[test]
     fn test_default_config() {

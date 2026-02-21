@@ -250,7 +250,7 @@ impl Error {
             }
             Error::Internal(_) => {
                 "Internal error - this should not happen. Please report this issue \
-                 at https://github.com/pleme-io/nexus/issues with full context."
+                 at https://github.com/pleme-io/shinka/issues with full context."
             }
             Error::Finalizer(_) => {
                 "Finalizer operation failed. If deletion is stuck:\n\

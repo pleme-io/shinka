@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Pleme Team <team@pleme.io>"]
 description = "Shinka (進化) - GitOps-native database migration operator for Kubernetes"
+license = "MIT"
+repository = "https://github.com/pleme-io/shinka"
 
 [lib]
 name = "shinka"
@@ -52,6 +54,7 @@ humantime = "2.1"
 
 # HTTP server (REST API)
 axum = { version = "0.8", features = ["json"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 
 # HTTP client (for shinka-wait init container)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

@@ -3,6 +3,7 @@
 //! These types represent the canonical API representations that are translated
 //! to/from protocol-specific formats by each API layer.
 
+use async_graphql::SimpleObject;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -16,7 +17,8 @@ use crate::crd::{
 // =============================================================================
 
 /// Migration resource as exposed via API
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "Migration")]
 pub struct MigrationResource {
     /// Resource name
     pub name: String,
@@ -41,7 +43,8 @@ pub struct MigrationResource {
 }
 
 /// Summary of migration spec for API responses
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "MigrationSpec")]
 pub struct MigrationSpecSummary {
     /// CNPG cluster name
     pub cnpg_cluster: String,
@@ -69,7 +72,8 @@ pub struct MigrationSpecSummary {
 }
 
 /// Summary of migration status for API responses
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "MigrationStatus")]
 pub struct MigrationStatusSummary {
     /// Current phase
     pub phase: String,
@@ -88,7 +92,8 @@ pub struct MigrationStatusSummary {
 }
 
 /// Last migration information
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "LastMigration")]
 pub struct LastMigrationInfo {
     /// Image tag that was migrated
     pub image_tag: String,
@@ -107,7 +112,8 @@ pub struct LastMigrationInfo {
 }
 
 /// Condition information
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "Condition")]
 pub struct ConditionInfo {
     /// Condition type
     pub condition_type: String,
@@ -130,7 +136,8 @@ pub struct ConditionInfo {
 // =============================================================================
 
 /// Database readiness information
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "DatabaseReady")]
 pub struct DatabaseReadiness {
     /// Overall readiness
     pub ready: bool,
@@ -152,7 +159,8 @@ pub struct DatabaseReadiness {
 }
 
 /// CNPG cluster health information
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "ClusterHealth")]
 pub struct ClusterHealth {
     /// Overall health status
     pub healthy: bool,
@@ -177,7 +185,8 @@ pub struct ClusterHealth {
 }
 
 /// Database summary information
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "Database")]
 pub struct DatabaseInfo {
     /// Kubernetes namespace
     pub namespace: String,
@@ -206,7 +215,8 @@ pub struct DatabaseInfo {
 // =============================================================================
 
 /// Migration queue status
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "Queue")]
 pub struct QueueStatus {
     /// Whether the queue is paused
     pub paused: bool,
@@ -231,7 +241,8 @@ pub struct QueueStatus {
 }
 
 /// Queue item information
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "QueueItem")]
 pub struct QueueItem {
     /// Migration namespace
     pub namespace: String,
@@ -256,7 +267,8 @@ pub struct QueueItem {
 }
 
 /// Migration history entry
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, SimpleObject, Serialize, Deserialize)]
+#[graphql(name = "HistoryEntry")]
 pub struct MigrationHistoryEntry {
     /// Image tag
     pub image_tag: String,

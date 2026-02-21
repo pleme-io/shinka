@@ -1,5 +1,7 @@
 # Shinka API Design
 
+> **Note:** This is a design document describing the target API surface. Some sections may not yet be implemented or may differ from the current codebase. For the current API, refer to the source code in `src/api/` and the README.
+
 > Comprehensive API specification for application integration with Shinka migration operator.
 
 ## Overview
@@ -55,18 +57,18 @@ GET /migrations?migrator={type}
   "items": [
     {
       "metadata": {
-        "name": "lilitu-backend",
-        "namespace": "lilitu-staging",
+        "name": "myapp-backend",
+        "namespace": "myapp-staging",
         "uid": "abc123",
         "creationTimestamp": "2025-01-15T10:00:00Z"
       },
       "spec": {
         "database": {
-          "cnpgClusterRef": { "name": "lilitu-postgres", "database": "lilitu" }
+          "cnpgClusterRef": { "name": "myapp-postgres", "database": "myapp" }
         },
         "migrator": {
           "type": "sqlx",
-          "deploymentRef": { "name": "lilitu-backend" }
+          "deploymentRef": { "name": "myapp-backend" }
         }
       },
       "status": {
@@ -108,8 +110,8 @@ GET /migrations/{namespace}/{name}
   "apiVersion": "shinka.pleme.io/v1",
   "kind": "Migration",
   "metadata": {
-    "name": "lilitu-backend",
-    "namespace": "lilitu-staging",
+    "name": "myapp-backend",
+    "namespace": "myapp-staging",
     "uid": "abc123",
     "generation": 5,
     "creationTimestamp": "2025-01-15T10:00:00Z"
@@ -126,7 +128,7 @@ GET /migrations/{namespace}/{name}
       "success": true,
       "duration": "12s",
       "completedAt": "2025-01-15T10:05:00Z",
-      "jobName": "lilitu-backend-migration-a1b2c3d4"
+      "jobName": "myapp-backend-migration-a1b2c3d4"
     },
     "retryCount": 0,
     "currentJob": null,
@@ -248,14 +250,14 @@ GET /migrations/{namespace}/{name}/conditions
       "type": "DatabaseHealthy",
       "status": "True",
       "reason": "ClusterReady",
-      "message": "CNPG cluster lilitu-postgres is healthy",
+      "message": "CNPG cluster myapp-postgres is healthy",
       "lastTransitionTime": "2025-01-15T10:04:55Z"
     },
     {
       "type": "DeploymentFound",
       "status": "True",
       "reason": "DeploymentExists",
-      "message": "Deployment lilitu-backend found with image sha-abc123",
+      "message": "Deployment myapp-backend found with image sha-abc123",
       "lastTransitionTime": "2025-01-15T10:04:50Z"
     }
   ],
@@ -290,7 +292,7 @@ GET /migrations/{namespace}/{name}/history?limit=10
       "duration": "12s",
       "startedAt": "2025-01-15T10:04:48Z",
       "completedAt": "2025-01-15T10:05:00Z",
-      "jobName": "lilitu-backend-migration-a1b2c3d4",
+      "jobName": "myapp-backend-migration-a1b2c3d4",
       "retryCount": 0
     },
     {
@@ -300,7 +302,7 @@ GET /migrations/{namespace}/{name}/history?limit=10
       "duration": "8s",
       "startedAt": "2025-01-14T15:29:52Z",
       "completedAt": "2025-01-14T15:30:00Z",
-      "jobName": "lilitu-backend-migration-e5f6g7h8",
+      "jobName": "myapp-backend-migration-e5f6g7h8",
       "retryCount": 0
     }
   ],
@@ -333,14 +335,14 @@ GET /databases?healthy={true|false}
 {
   "databases": [
     {
-      "name": "lilitu-postgres",
-      "namespace": "lilitu-staging",
+      "name": "myapp-postgres",
+      "namespace": "myapp-staging",
       "healthy": true,
       "status": {
         "phase": "Cluster in healthy state",
         "instances": 3,
         "readyInstances": 3,
-        "primaryPod": "lilitu-postgres-1"
+        "primaryPod": "myapp-postgres-1"
       },
       "migrations": {
         "total": 3,
@@ -468,8 +470,8 @@ WS /events?migration={namespace}/{name}
   "type": "MigrationStarted",
   "timestamp": "2025-01-15T10:04:48Z",
   "migration": {
-    "name": "lilitu-backend",
-    "namespace": "lilitu-staging"
+    "name": "myapp-backend",
+    "namespace": "myapp-staging"
   },
   "data": {
     "imageTag": "sha-abc123",
@@ -481,8 +483,8 @@ WS /events?migration={namespace}/{name}
   "type": "MigrationCompleted",
   "timestamp": "2025-01-15T10:05:00Z",
   "migration": {
-    "name": "lilitu-backend",
-    "namespace": "lilitu-staging"
+    "name": "myapp-backend",
+    "namespace": "myapp-staging"
   },
   "data": {
     "success": true,
@@ -510,8 +512,8 @@ WS /events?migration={namespace}/{name}
   "type": "DatabaseHealthChanged",
   "timestamp": "2025-01-15T10:03:00Z",
   "database": {
-    "name": "lilitu-postgres",
-    "namespace": "lilitu-staging"
+    "name": "myapp-postgres",
+    "namespace": "myapp-staging"
   },
   "data": {
     "healthy": true,

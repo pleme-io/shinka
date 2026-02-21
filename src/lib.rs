@@ -55,6 +55,7 @@ pub mod leader;
 pub mod metrics;
 pub mod migrator;
 pub mod redact;
+pub mod util;
 pub mod webhook;
 
 pub use api::MigrationApiService;

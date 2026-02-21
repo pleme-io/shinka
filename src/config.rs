@@ -67,6 +67,20 @@ pub struct Config {
 
     /// Discord webhook configuration for beautiful notifications
     pub discord: DiscordConfig,
+
+    /// TTL in seconds for completed migration Jobs (Kubernetes garbage collection)
+    /// Set to 0 to disable automatic cleanup (manual deletion required)
+    pub job_ttl_seconds: i32,
+
+    /// Whether to inject an annotation disabling service mesh sidecar on migration pods
+    /// Prevents race conditions where migration starts before mesh proxy is ready
+    pub disable_mesh_sidecar: bool,
+
+    /// Annotation key for disabling mesh sidecar injection (e.g., "sidecar.istio.io/inject")
+    pub mesh_sidecar_annotation_key: String,
+
+    /// Annotation value for disabling mesh sidecar injection (e.g., "false")
+    pub mesh_sidecar_annotation_value: String,
 }
 
 /// Configuration for parallel migration execution
@@ -79,7 +93,7 @@ pub struct Config {
 #[serde(rename_all = "camelCase")]
 pub struct ParallelizationConfig {
     /// Enable parallel migrations for independent databases
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::util::default_true")]
     pub enabled: bool,
 
     /// Maximum concurrent migrations across all databases
@@ -103,10 +117,6 @@ pub struct ParallelizationConfig {
     /// Enable automatic concurrency adjustment based on load
     #[serde(default)]
     pub auto_scale: bool,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn default_max_concurrent() -> u32 {
@@ -256,6 +266,18 @@ pub struct OperatorSettings {
     /// Discord webhook configuration
     #[serde(default)]
     pub discord: DiscordConfig,
+
+    /// TTL in seconds for completed migration Jobs
+    pub job_ttl_seconds: Option<i32>,
+
+    /// Whether to inject mesh sidecar disable annotation
+    pub disable_mesh_sidecar: Option<bool>,
+
+    /// Annotation key for disabling mesh sidecar
+    pub mesh_sidecar_annotation_key: Option<String>,
+
+    /// Annotation value for disabling mesh sidecar
+    pub mesh_sidecar_annotation_value: Option<String>,
 }
 
 impl Default for Config {
@@ -277,6 +299,10 @@ impl Default for Config {
             database_connect_timeout: Duration::from_secs(10),
             graceful_shutdown_delay: Duration::from_secs(2),
             discord: DiscordConfig::default(),
+            job_ttl_seconds: 3600,
+            disable_mesh_sidecar: true,
+            mesh_sidecar_annotation_key: "sidecar.istio.io/inject".to_string(),
+            mesh_sidecar_annotation_value: "false".to_string(),
         }
     }
 }
@@ -329,6 +355,24 @@ impl Config {
                 "pretty" => LogFormat::Pretty,
                 _ => LogFormat::Json,
             };
+        }
+
+        // Job TTL for completed migrations
+        if let Ok(ttl) = std::env::var("JOB_TTL_SECONDS") {
+            if let Ok(t) = ttl.parse::<i32>() {
+                config.job_ttl_seconds = t;
+            }
+        }
+
+        // Mesh sidecar injection control
+        if let Ok(val) = std::env::var("DISABLE_MESH_SIDECAR") {
+            config.disable_mesh_sidecar = val == "true" || val == "1";
+        }
+        if let Ok(key) = std::env::var("MESH_SIDECAR_ANNOTATION_KEY") {
+            config.mesh_sidecar_annotation_key = key;
+        }
+        if let Ok(val) = std::env::var("MESH_SIDECAR_ANNOTATION_VALUE") {
+            config.mesh_sidecar_annotation_value = val;
         }
 
         // Check for YAML config file
@@ -481,6 +525,20 @@ impl Config {
         }
         if let Some(delay) = yaml_config.operator.graceful_shutdown_delay_seconds {
             self.graceful_shutdown_delay = Duration::from_secs(delay);
+        }
+
+        // Merge job/mesh config from YAML
+        if let Some(ttl) = yaml_config.operator.job_ttl_seconds {
+            self.job_ttl_seconds = ttl;
+        }
+        if let Some(disable) = yaml_config.operator.disable_mesh_sidecar {
+            self.disable_mesh_sidecar = disable;
+        }
+        if let Some(key) = yaml_config.operator.mesh_sidecar_annotation_key {
+            self.mesh_sidecar_annotation_key = key;
+        }
+        if let Some(val) = yaml_config.operator.mesh_sidecar_annotation_value {
+            self.mesh_sidecar_annotation_value = val;
         }
 
         // Merge Discord config from YAML (YAML overrides env vars)
@@ -845,6 +903,10 @@ impl MigratorDefaults {
                 database_connect_timeout_seconds: Some(10),
                 graceful_shutdown_delay_seconds: Some(2),
                 discord: DiscordConfig::default(),
+                job_ttl_seconds: Some(3600),
+                disable_mesh_sidecar: None,
+                mesh_sidecar_annotation_key: None,
+                mesh_sidecar_annotation_value: None,
             },
             parallelization: ParallelizationConfig::default(),
             migrators: Self::example(),

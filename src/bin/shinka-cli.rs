@@ -7,22 +7,22 @@
 //! ```bash
 //! # List all migrations
 //! shinka-cli list
-//! shinka-cli list -n lilitu-staging
+//! shinka-cli list -n myapp-staging
 //!
 //! # Get migration status
-//! shinka-cli status lilitu-backend -n lilitu-staging
+//! shinka-cli status myapp-backend -n myapp-staging
 //!
 //! # View migration history
-//! shinka-cli history lilitu-backend -n lilitu-staging --limit 10
+//! shinka-cli history myapp-backend -n myapp-staging --limit 10
 //!
 //! # Retry a failed migration
-//! shinka-cli retry lilitu-backend -n lilitu-staging
+//! shinka-cli retry myapp-backend -n myapp-staging
 //!
 //! # Watch migration status (live updates)
-//! shinka-cli watch lilitu-backend -n lilitu-staging
+//! shinka-cli watch myapp-backend -n myapp-staging
 //!
 //! # Get logs from the last migration job
-//! shinka-cli logs lilitu-backend -n lilitu-staging
+//! shinka-cli logs myapp-backend -n myapp-staging
 //! ```
 
 use std::time::Duration;

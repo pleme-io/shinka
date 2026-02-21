@@ -102,6 +102,10 @@ struct Config {
     cluster_name: Option<String>,
     /// Database name (optional for database mode)
     database: Option<String>,
+    /// Per-request HTTP timeout
+    http_request_timeout: Duration,
+    /// Global HTTP client timeout
+    http_client_timeout: Duration,
 }
 
 impl Config {
@@ -142,6 +146,16 @@ impl Config {
             _ => {}
         }
 
+        let http_request_timeout_secs: u64 = env::var("HTTP_REQUEST_TIMEOUT_SECONDS")
+            .unwrap_or_else(|_| "10".to_string())
+            .parse()
+            .map_err(|_| "HTTP_REQUEST_TIMEOUT_SECONDS must be a valid number")?;
+
+        let http_client_timeout_secs: u64 = env::var("HTTP_CLIENT_TIMEOUT_SECONDS")
+            .unwrap_or_else(|_| "30".to_string())
+            .parse()
+            .map_err(|_| "HTTP_CLIENT_TIMEOUT_SECONDS must be a valid number")?;
+
         Ok(Self {
             shinka_url,
             namespace,
@@ -151,6 +165,8 @@ impl Config {
             migration_name,
             cluster_name,
             database,
+            http_request_timeout: Duration::from_secs(http_request_timeout_secs),
+            http_client_timeout: Duration::from_secs(http_client_timeout_secs),
         })
     }
 }
@@ -176,7 +192,7 @@ async fn check_migration_ready(
 
     let response = client
         .get(&url)
-        .timeout(Duration::from_secs(10))
+        .timeout(config.http_request_timeout)
         .send()
         .await?;
 
@@ -231,7 +247,7 @@ async fn check_database_ready(
 
     let response = client
         .get(&url)
-        .timeout(Duration::from_secs(10))
+        .timeout(config.http_request_timeout)
         .send()
         .await?;
 
@@ -332,7 +348,7 @@ async fn main() -> ExitCode {
 
     // Create HTTP client
     let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(config.http_client_timeout)
         .build()
     {
         Ok(c) => c,

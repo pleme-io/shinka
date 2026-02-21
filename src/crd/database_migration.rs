@@ -52,7 +52,7 @@ pub const FINALIZER: &str = "shinka.pleme.io/finalizer";
 ///   kubectl annotate databasemigration my-migration shinka.pleme.io/retry=true
 pub const RETRY_ANNOTATION: &str = "shinka.pleme.io/retry";
 
-/// Annotation key set by nexus-deploy to signal an expected release tag
+/// Annotation key set by deployment tooling to signal an expected release tag
 ///
 /// When set, Shinka will:
 /// 1. Invalidate its deployment image cache immediately
@@ -330,7 +330,7 @@ impl std::fmt::Display for ChecksumMode {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SafetySpec {
     /// Require CNPG cluster to be healthy before migration
-    #[serde(default = "default_true", rename = "requireHealthyCluster")]
+    #[serde(default = "crate::util::default_true", rename = "requireHealthyCluster")]
     pub require_healthy_cluster: bool,
 
     /// Maximum number of retry attempts for failed migrations
@@ -370,10 +370,6 @@ impl Default for SafetySpec {
             continue_on_failure: false,
         }
     }
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn default_max_retries() -> u32 {
@@ -675,7 +671,7 @@ impl DatabaseMigration {
 
     /// Get the expected release tag from the annotation, if set
     ///
-    /// Returns `Some("amd64-abc1234")` if nexus-deploy set the expected-tag annotation.
+    /// Returns `Some("amd64-abc1234")` if deployment tooling set the expected-tag annotation.
     pub fn expected_release_tag(&self) -> Option<&str> {
         self.metadata
             .annotations
