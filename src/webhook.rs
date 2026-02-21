@@ -438,7 +438,13 @@ pub async fn serve(config: WebhookConfig, client: Client) -> Result<()> {
         "Starting webhook server"
     );
 
-    // Use TLS if certificate and key are configured (required for K8s admission webhooks)
+    serve_webhook(router, &addr, &config).await?;
+
+    Ok(())
+}
+
+#[cfg(feature = "tls")]
+async fn serve_webhook(router: Router, addr: &str, config: &WebhookConfig) -> Result<()> {
     if let (Some(cert_path), Some(key_path)) = (&config.cert_path, &config.key_path) {
         tracing::info!(
             cert_path = %cert_path,
@@ -459,16 +465,29 @@ pub async fn serve(config: WebhookConfig, client: Client) -> Result<()> {
             .await
             .map_err(|e| crate::Error::Internal(format!("Webhook TLS server error: {}", e)))?;
     } else {
-        tracing::warn!("Webhook server running without TLS - not suitable for K8s admission webhooks in production");
-
-        let listener = tokio::net::TcpListener::bind(&addr)
-            .await
-            .map_err(|e| crate::Error::Internal(format!("Failed to bind webhook server: {}", e)))?;
-
-        axum::serve(listener, router)
-            .await
-            .map_err(|e| crate::Error::Internal(format!("Webhook server error: {}", e)))?;
+        serve_plain(router, addr).await?;
     }
+    Ok(())
+}
+
+#[cfg(not(feature = "tls"))]
+async fn serve_webhook(router: Router, addr: &str, config: &WebhookConfig) -> Result<()> {
+    if config.cert_path.is_some() || config.key_path.is_some() {
+        tracing::warn!("TLS cert/key configured but shinka was built without 'tls' feature - ignoring");
+    }
+    serve_plain(router, addr).await
+}
+
+async fn serve_plain(router: Router, addr: &str) -> Result<()> {
+    tracing::warn!("Webhook server running without TLS - not suitable for K8s admission webhooks in production");
+
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| crate::Error::Internal(format!("Failed to bind webhook server: {}", e)))?;
+
+    axum::serve(listener, router)
+        .await
+        .map_err(|e| crate::Error::Internal(format!("Webhook server error: {}", e)))?;
 
     Ok(())
 }

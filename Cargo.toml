@@ -21,6 +21,8 @@ path = "src/bin/shinka-cli.rs"
 
 [features]
 default = []
+# TLS support for admission webhook server (pulls in aws-lc-sys via rustls)
+tls = ["dep:axum-server"]
 # gRPC support - requires protoc at build time
 grpc = ["dep:tonic", "dep:prost", "dep:prost-types", "dep:tonic-build"]
 
@@ -54,7 +56,7 @@ humantime = "2.1"
 
 # HTTP server (REST API)
 axum = { version = "0.8", features = ["json"] }
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
 
 # HTTP client (for shinka-wait init container)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

@@ -9604,6 +9604,7 @@ rec {
           {
             name = "axum-server";
             packageId = "axum-server";
+            optional = true;
             features = [ "tls-rustls" ];
           }
           {
@@ -9748,8 +9749,9 @@ rec {
         ];
         features = {
           "grpc" = [ "dep:tonic" "dep:prost" "dep:prost-types" "dep:tonic-build" ];
+          "tls" = [ "dep:axum-server" ];
         };
-        resolvedDefaultFeatures = [ "default" "grpc" ];
+        resolvedDefaultFeatures = [ "default" "grpc" "tls" ];
       };
       "shlex" = rec {
         crateName = "shlex";
