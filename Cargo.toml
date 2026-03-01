@@ -6,6 +6,11 @@ authors = ["Pleme Team <team@pleme.io>"]
 description = "Shinka (進化) - GitOps-native database migration operator for Kubernetes"
 license = "MIT"
 repository = "https://github.com/pleme-io/shinka"
+homepage = "https://github.com/pleme-io/shinka"
+readme = "README.md"
+keywords = ["kubernetes", "operator", "database", "migration", "gitops"]
+categories = ["command-line-utilities", "database"]
+exclude = ["deploy/", "docs/", "module/", "proto/", "target/", "result-*", "Cargo.nix", "flake.*"]
 
 [lib]
 name = "shinka"
