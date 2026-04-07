@@ -1074,4 +1074,131 @@ mod tests {
         assert!(config.notify_on_checksum);
         assert!(config.notify_on_release);
     }
+
+    #[test]
+    fn test_should_notify_started() {
+        let config = DiscordConfig::default();
+        assert!(config.should_notify(&MigrationEventType::Started));
+
+        let mut config = DiscordConfig::default();
+        config.notify_on_started = false;
+        assert!(!config.should_notify(&MigrationEventType::Started));
+    }
+
+    #[test]
+    fn test_should_notify_succeeded() {
+        let config = DiscordConfig::default();
+        assert!(config.should_notify(&MigrationEventType::Succeeded));
+
+        let mut config = DiscordConfig::default();
+        config.notify_on_success = false;
+        assert!(!config.should_notify(&MigrationEventType::Succeeded));
+    }
+
+    #[test]
+    fn test_should_notify_failed() {
+        let config = DiscordConfig::default();
+        assert!(config.should_notify(&MigrationEventType::Failed));
+
+        let mut config = DiscordConfig::default();
+        config.notify_on_failure = false;
+        assert!(!config.should_notify(&MigrationEventType::Failed));
+    }
+
+    #[test]
+    fn test_should_notify_auto_retried() {
+        let config = DiscordConfig::default();
+        assert!(config.should_notify(&MigrationEventType::AutoRetried));
+    }
+
+    #[test]
+    fn test_should_notify_health_events_off_by_default() {
+        let config = DiscordConfig::default();
+        assert!(!config.should_notify(&MigrationEventType::HealthCheckPassed));
+        assert!(!config.should_notify(&MigrationEventType::HealthCheckFailed));
+    }
+
+    #[test]
+    fn test_should_notify_health_events_when_enabled() {
+        let mut config = DiscordConfig::default();
+        config.notify_on_health = true;
+        assert!(config.should_notify(&MigrationEventType::HealthCheckPassed));
+        assert!(config.should_notify(&MigrationEventType::HealthCheckFailed));
+    }
+
+    #[test]
+    fn test_should_notify_checksum_events() {
+        let config = DiscordConfig::default();
+        assert!(config.should_notify(&MigrationEventType::ChecksumMismatch));
+        assert!(config.should_notify(&MigrationEventType::ChecksumReconciled));
+        assert!(config.should_notify(&MigrationEventType::PreFlightFailed));
+    }
+
+    #[test]
+    fn test_should_notify_release_detected() {
+        let config = DiscordConfig::default();
+        assert!(config.should_notify(&MigrationEventType::ReleaseDetected));
+    }
+
+    #[test]
+    fn test_build_failure_mentions_none() {
+        let config = DiscordConfig::default();
+        assert!(config.build_failure_mentions().is_none());
+    }
+
+    #[test]
+    fn test_build_failure_mentions_role_only() {
+        let mut config = DiscordConfig::default();
+        config.failure_mention_role = Some("12345".to_string());
+        let mentions = config.build_failure_mentions().unwrap();
+        assert_eq!(mentions, "<@&12345>");
+    }
+
+    #[test]
+    fn test_build_failure_mentions_users_only() {
+        let mut config = DiscordConfig::default();
+        config.failure_mention_users = vec!["user1".to_string(), "user2".to_string()];
+        let mentions = config.build_failure_mentions().unwrap();
+        assert!(mentions.contains("<@user1>"));
+        assert!(mentions.contains("<@user2>"));
+    }
+
+    #[test]
+    fn test_build_failure_mentions_role_and_users() {
+        let mut config = DiscordConfig::default();
+        config.failure_mention_role = Some("99999".to_string());
+        config.failure_mention_users = vec!["user1".to_string()];
+        let mentions = config.build_failure_mentions().unwrap();
+        assert!(mentions.contains("<@&99999>"));
+        assert!(mentions.contains("<@user1>"));
+    }
+
+    #[test]
+    fn test_discord_config_serde_roundtrip() {
+        let config = DiscordConfig {
+            webhook_url: Some("https://discord.com/api/webhooks/123/abc".to_string()),
+            cluster_name: "test-cluster".to_string(),
+            environment: "staging".to_string(),
+            ..Default::default()
+        };
+        let serialized = serde_json::to_string(&config).unwrap();
+        let deserialized: DiscordConfig = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.cluster_name, "test-cluster");
+        assert_eq!(deserialized.environment, "staging");
+    }
+
+    #[test]
+    fn test_optional_discord_not_configured() {
+        let config = DiscordConfig::default();
+        let client = OptionalDiscordClient::from_config(config, Duration::from_secs(10));
+        assert!(!client.is_configured());
+    }
+
+    #[test]
+    fn test_optional_discord_empty_url() {
+        let mut config = DiscordConfig::default();
+        config.webhook_url = Some("".to_string());
+        let client = OptionalDiscordClient::from_config(config, Duration::from_secs(10));
+        assert!(!client.is_configured());
+    }
 }
