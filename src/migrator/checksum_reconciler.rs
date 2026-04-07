@@ -681,4 +681,134 @@ mod tests {
             assert!(!table.ends_with("_column"), "Found column in tables: {}", table);
         }
     }
+
+    #[test]
+    fn test_detect_version_mismatch_case_insensitive() {
+        let logs = "MIGRATION 7 WAS PREVIOUSLY APPLIED BUT HAS BEEN MODIFIED";
+        let result = detect_version_mismatch(logs);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().version, 7);
+    }
+
+    #[test]
+    fn test_detect_version_mismatch_large_version() {
+        let logs = "Error: VersionMismatch(20260117120000)";
+        let result = detect_version_mismatch(logs);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().version, 20260117120000);
+    }
+
+    #[test]
+    fn test_calculate_checksum_deterministic() {
+        let content = b"SELECT 1;";
+        let c1 = calculate_checksum(content);
+        let c2 = calculate_checksum(content);
+        assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn test_calculate_checksum_different_content() {
+        let c1 = calculate_checksum(b"CREATE TABLE a;");
+        let c2 = calculate_checksum(b"CREATE TABLE b;");
+        assert_ne!(c1, c2);
+    }
+
+    #[test]
+    fn test_calculate_checksum_empty() {
+        let c = calculate_checksum(b"");
+        assert_eq!(c.len(), 48);
+    }
+
+    #[test]
+    fn test_extract_secret_names_with_secrets() {
+        use crate::crd::{EnvFromSource, SecretRef};
+
+        let env_from = Some(vec![
+            EnvFromSource {
+                config_map_ref: None,
+                secret_ref: Some(SecretRef {
+                    name: "db-secret".to_string(),
+                }),
+            },
+            EnvFromSource {
+                config_map_ref: Some(crate::crd::ConfigMapRef {
+                    name: "app-config".to_string(),
+                }),
+                secret_ref: None,
+            },
+            EnvFromSource {
+                config_map_ref: None,
+                secret_ref: Some(SecretRef {
+                    name: "other-secret".to_string(),
+                }),
+            },
+        ]);
+
+        let names = extract_secret_names(&env_from);
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"db-secret".to_string()));
+        assert!(names.contains(&"other-secret".to_string()));
+    }
+
+    #[test]
+    fn test_extract_secret_names_none() {
+        let names = extract_secret_names(&None);
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_extract_secret_names_empty_vec() {
+        let names = extract_secret_names(&Some(vec![]));
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_extract_secret_names_configmaps_only() {
+        use crate::crd::EnvFromSource;
+
+        let env_from = Some(vec![EnvFromSource {
+            config_map_ref: Some(crate::crd::ConfigMapRef {
+                name: "config".to_string(),
+            }),
+            secret_ref: None,
+        }]);
+
+        let names = extract_secret_names(&env_from);
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_extract_table_names_empty_description() {
+        let tables =
+            ChecksumReconciler::extract_table_names_from_description("initial_setup_20260101");
+        assert!(
+            tables.is_empty()
+                || tables.iter().all(|t| !t.ends_with("_index")
+                    && !t.ends_with("_column")
+                    && !t.ends_with("_constraint"))
+        );
+    }
+
+    #[test]
+    fn test_extract_table_names_multiple_create_patterns() {
+        let tables = ChecksumReconciler::extract_table_names_from_description(
+            "create_users_table_and_create_orders_table",
+        );
+        assert!(tables.contains(&"users".to_string()));
+        assert!(tables.contains(&"orders".to_string()));
+    }
+
+    #[test]
+    fn test_extract_table_names_filters_constraint() {
+        let tables = ChecksumReconciler::extract_table_names_from_description(
+            "add_unique_constraint",
+        );
+        for table in &tables {
+            assert!(
+                !table.ends_with("_constraint"),
+                "Found constraint in tables: {}",
+                table
+            );
+        }
+    }
 }
