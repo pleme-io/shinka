@@ -777,6 +777,533 @@ impl MigratorSpec {
     pub fn has_image_override(&self) -> bool {
         self.image_override.is_some()
     }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+
+    fn make_migration(
+        status: Option<DatabaseMigrationStatus>,
+        annotations: Option<std::collections::BTreeMap<String, String>>,
+    ) -> DatabaseMigration {
+        DatabaseMigration {
+            metadata: ObjectMeta {
+                name: Some("test-migration".to_string()),
+                namespace: Some("test-ns".to_string()),
+                annotations,
+                ..Default::default()
+            },
+            spec: DatabaseMigrationSpec {
+                database: DatabaseSpec {
+                    cnpg_cluster_ref: CnpgClusterRef {
+                        name: "my-cluster".to_string(),
+                        database: Some("mydb".to_string()),
+                    },
+                },
+                migrator: Some(MigratorSpec {
+                    name: None,
+                    migrator_type: crate::migrator::MigratorType::Sqlx,
+                    deployment_ref: DeploymentRef {
+                        name: "backend".to_string(),
+                        container_name: None,
+                    },
+                    image_override: None,
+                    command: None,
+                    args: None,
+                    working_dir: None,
+                    migrations_path: None,
+                    env: None,
+                    tool_config: None,
+                    secret_refs: None,
+                    env_from: None,
+                    resources: None,
+                    service_account_name: None,
+                }),
+                migrators: None,
+                safety: SafetySpec::default(),
+                timeouts: TimeoutSpec::default(),
+            },
+            status,
+        }
+    }
+
+    #[test]
+    fn test_namespace_or_default_with_namespace() {
+        let m = make_migration(None, None);
+        assert_eq!(m.namespace_or_default(), "test-ns");
+    }
+
+    #[test]
+    fn test_namespace_or_default_without_namespace() {
+        let mut m = make_migration(None, None);
+        m.metadata.namespace = None;
+        assert_eq!(m.namespace_or_default(), "default");
+    }
+
+    #[test]
+    fn test_name_or_default_with_name() {
+        let m = make_migration(None, None);
+        assert_eq!(m.name_or_default(), "test-migration");
+    }
+
+    #[test]
+    fn test_name_or_default_without_name() {
+        let mut m = make_migration(None, None);
+        m.metadata.name = None;
+        assert_eq!(m.name_or_default(), "unknown");
+    }
+
+    #[test]
+    fn test_needs_migration_no_status() {
+        let m = make_migration(None, None);
+        assert!(m.needs_migration("v1.0"));
+    }
+
+    #[test]
+    fn test_needs_migration_no_last_migration() {
+        let m = make_migration(
+            Some(DatabaseMigrationStatus {
+                last_migration: None,
+                ..Default::default()
+            }),
+            None,
+        );
+        assert!(m.needs_migration("v1.0"));
+    }
+
+    #[test]
+    fn test_needs_migration_same_tag_success() {
+        let m = make_migration(
+            Some(DatabaseMigrationStatus {
+                last_migration: Some(LastMigration {
+                    image_tag: "v1.0".to_string(),
+                    success: true,
+                    duration: None,
+                    completed_at: None,
+                    error: None,
+                }),
+                ..Default::default()
+            }),
+            None,
+        );
+        assert!(!m.needs_migration("v1.0"));
+    }
+
+    #[test]
+    fn test_needs_migration_same_tag_failure() {
+        let m = make_migration(
+            Some(DatabaseMigrationStatus {
+                last_migration: Some(LastMigration {
+                    image_tag: "v1.0".to_string(),
+                    success: false,
+                    duration: None,
+                    completed_at: None,
+                    error: Some("SQL error".to_string()),
+                }),
+                ..Default::default()
+            }),
+            None,
+        );
+        assert!(m.needs_migration("v1.0"));
+    }
+
+    #[test]
+    fn test_needs_migration_different_tag() {
+        let m = make_migration(
+            Some(DatabaseMigrationStatus {
+                last_migration: Some(LastMigration {
+                    image_tag: "v1.0".to_string(),
+                    success: true,
+                    duration: None,
+                    completed_at: None,
+                    error: None,
+                }),
+                ..Default::default()
+            }),
+            None,
+        );
+        assert!(m.needs_migration("v2.0"));
+    }
+
+    #[test]
+    fn test_retry_count_no_status() {
+        let m = make_migration(None, None);
+        assert_eq!(m.retry_count(), 0);
+    }
+
+    #[test]
+    fn test_retry_count_with_retries() {
+        let m = make_migration(
+            Some(DatabaseMigrationStatus {
+                retry_count: Some(3),
+                ..Default::default()
+            }),
+            None,
+        );
+        assert_eq!(m.retry_count(), 3);
+    }
+
+    #[test]
+    fn test_retries_exhausted() {
+        let mut m = make_migration(
+            Some(DatabaseMigrationStatus {
+                retry_count: Some(3),
+                ..Default::default()
+            }),
+            None,
+        );
+        assert!(m.retries_exhausted());
+
+        m.status.as_mut().unwrap().retry_count = Some(2);
+        assert!(!m.retries_exhausted());
+    }
+
+    #[test]
+    fn test_last_image_tag() {
+        let m = make_migration(
+            Some(DatabaseMigrationStatus {
+                last_migration: Some(LastMigration {
+                    image_tag: "abc123".to_string(),
+                    success: true,
+                    duration: None,
+                    completed_at: None,
+                    error: None,
+                }),
+                ..Default::default()
+            }),
+            None,
+        );
+        assert_eq!(m.last_image_tag(), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn test_last_image_tag_none() {
+        let m = make_migration(None, None);
+        assert_eq!(m.last_image_tag(), None);
+    }
+
+    #[test]
+    fn test_has_retry_annotation_true() {
+        let mut annotations = std::collections::BTreeMap::new();
+        annotations.insert(RETRY_ANNOTATION.to_string(), "true".to_string());
+        let m = make_migration(None, Some(annotations));
+        assert!(m.has_retry_annotation());
+    }
+
+    #[test]
+    fn test_has_retry_annotation_case_insensitive() {
+        let mut annotations = std::collections::BTreeMap::new();
+        annotations.insert(RETRY_ANNOTATION.to_string(), "TRUE".to_string());
+        let m = make_migration(None, Some(annotations));
+        assert!(m.has_retry_annotation());
+    }
+
+    #[test]
+    fn test_has_retry_annotation_false() {
+        let mut annotations = std::collections::BTreeMap::new();
+        annotations.insert(RETRY_ANNOTATION.to_string(), "false".to_string());
+        let m = make_migration(None, Some(annotations));
+        assert!(!m.has_retry_annotation());
+    }
+
+    #[test]
+    fn test_has_retry_annotation_missing() {
+        let m = make_migration(None, None);
+        assert!(!m.has_retry_annotation());
+    }
+
+    #[test]
+    fn test_expected_release_tag_present() {
+        let mut annotations = std::collections::BTreeMap::new();
+        annotations.insert(
+            EXPECTED_TAG_ANNOTATION.to_string(),
+            "amd64-abc1234".to_string(),
+        );
+        let m = make_migration(None, Some(annotations));
+        assert_eq!(m.expected_release_tag(), Some("amd64-abc1234"));
+    }
+
+    #[test]
+    fn test_expected_release_tag_empty() {
+        let mut annotations = std::collections::BTreeMap::new();
+        annotations.insert(EXPECTED_TAG_ANNOTATION.to_string(), "".to_string());
+        let m = make_migration(None, Some(annotations));
+        assert_eq!(m.expected_release_tag(), None);
+    }
+
+    #[test]
+    fn test_expected_release_tag_missing() {
+        let m = make_migration(None, None);
+        assert_eq!(m.expected_release_tag(), None);
+    }
+
+    #[test]
+    fn test_get_migrators_single() {
+        let m = make_migration(None, None);
+        let migrators = m.get_migrators();
+        assert_eq!(migrators.len(), 1);
+        assert_eq!(migrators[0].deployment_ref.name, "backend");
+    }
+
+    #[test]
+    fn test_get_migrators_multi() {
+        let mut m = make_migration(None, None);
+        let spec2 = m.spec.migrator.clone().unwrap();
+        m.spec.migrators = Some(vec![m.spec.migrator.clone().unwrap(), spec2]);
+        m.spec.migrator = None;
+        let migrators = m.get_migrators();
+        assert_eq!(migrators.len(), 2);
+    }
+
+    #[test]
+    fn test_get_migrators_none() {
+        let mut m = make_migration(None, None);
+        m.spec.migrator = None;
+        m.spec.migrators = None;
+        assert!(m.get_migrators().is_empty());
+    }
+
+    #[test]
+    fn test_is_multi_migrator() {
+        let mut m = make_migration(None, None);
+        assert!(!m.is_multi_migrator());
+
+        let spec = m.spec.migrator.clone().unwrap();
+        m.spec.migrators = Some(vec![spec.clone(), spec]);
+        assert!(m.is_multi_migrator());
+    }
+
+    #[test]
+    fn test_all_migrators_complete_empty() {
+        let mut m = make_migration(None, None);
+        m.spec.migrator = None;
+        m.spec.migrators = None;
+        assert!(m.all_migrators_complete());
+    }
+
+    #[test]
+    fn test_all_migrators_complete_partial() {
+        let m = make_migration(
+            Some(DatabaseMigrationStatus {
+                migrator_results: Some(vec![]),
+                ..Default::default()
+            }),
+            None,
+        );
+        assert!(!m.all_migrators_complete());
+    }
+
+    #[test]
+    fn test_all_migrators_complete_done() {
+        let m = make_migration(
+            Some(DatabaseMigrationStatus {
+                migrator_results: Some(vec![MigratorResult {
+                    index: 0,
+                    name: "sqlx".to_string(),
+                    migrator_type: "sqlx".to_string(),
+                    success: true,
+                    duration: None,
+                    completed_at: None,
+                    error: None,
+                    job_name: None,
+                }]),
+                ..Default::default()
+            }),
+            None,
+        );
+        assert!(m.all_migrators_complete());
+    }
+
+    #[test]
+    fn test_any_migrator_failed() {
+        let m = make_migration(
+            Some(DatabaseMigrationStatus {
+                migrator_results: Some(vec![
+                    MigratorResult {
+                        index: 0,
+                        name: "sqlx".to_string(),
+                        migrator_type: "sqlx".to_string(),
+                        success: true,
+                        duration: None,
+                        completed_at: None,
+                        error: None,
+                        job_name: None,
+                    },
+                    MigratorResult {
+                        index: 1,
+                        name: "seaorm".to_string(),
+                        migrator_type: "seaorm".to_string(),
+                        success: false,
+                        duration: None,
+                        completed_at: None,
+                        error: Some("SQL error".to_string()),
+                        job_name: None,
+                    },
+                ]),
+                ..Default::default()
+            }),
+            None,
+        );
+        assert!(m.any_migrator_failed());
+    }
+
+    #[test]
+    fn test_primary_deployment_ref() {
+        let m = make_migration(None, None);
+        let dep_ref = m.primary_deployment_ref().unwrap();
+        assert_eq!(dep_ref.name, "backend");
+    }
+
+    #[test]
+    fn test_checksum_mode_display() {
+        assert_eq!(ChecksumMode::Strict.to_string(), "strict");
+        assert_eq!(ChecksumMode::AutoReconcile.to_string(), "auto-reconcile");
+        assert_eq!(ChecksumMode::PreFlight.to_string(), "pre-flight");
+    }
+
+    #[test]
+    fn test_migration_phase_display() {
+        assert_eq!(MigrationPhase::Pending.to_string(), "Pending");
+        assert_eq!(MigrationPhase::CheckingHealth.to_string(), "CheckingHealth");
+        assert_eq!(MigrationPhase::WaitingForDatabase.to_string(), "WaitingForDatabase");
+        assert_eq!(MigrationPhase::Migrating.to_string(), "Migrating");
+        assert_eq!(MigrationPhase::Ready.to_string(), "Ready");
+        assert_eq!(MigrationPhase::Failed.to_string(), "Failed");
+    }
+
+    #[test]
+    fn test_safety_spec_defaults() {
+        let s = SafetySpec::default();
+        assert!(s.require_healthy_cluster);
+        assert_eq!(s.max_retries, 3);
+        assert_eq!(s.checksum_mode, ChecksumMode::AutoReconcile);
+        assert!(!s.continue_on_failure);
+    }
+
+    #[test]
+    fn test_timeout_spec_defaults() {
+        let t = TimeoutSpec::default();
+        assert_eq!(t.migration, "5m");
+    }
+
+    #[test]
+    fn test_condition_ready() {
+        let c = Condition::ready(1, "MigrationSucceeded", "Migration completed");
+        assert_eq!(c.condition_type, "Ready");
+        assert_eq!(c.status, "True");
+        assert_eq!(c.observed_generation, Some(1));
+        assert_eq!(c.reason, Some("MigrationSucceeded".to_string()));
+    }
+
+    #[test]
+    fn test_condition_not_ready() {
+        let c = Condition::not_ready(2, "MigrationFailed", "SQL error");
+        assert_eq!(c.condition_type, "Ready");
+        assert_eq!(c.status, "False");
+        assert_eq!(c.observed_generation, Some(2));
+    }
+
+    #[test]
+    fn test_migrator_spec_display_name() {
+        let spec = MigratorSpec {
+            name: Some("my-migrations".to_string()),
+            migrator_type: crate::migrator::MigratorType::Sqlx,
+            deployment_ref: DeploymentRef {
+                name: "backend".to_string(),
+                container_name: None,
+            },
+            image_override: None,
+            command: None,
+            args: None,
+            working_dir: None,
+            migrations_path: None,
+            env: None,
+            tool_config: None,
+            secret_refs: None,
+            env_from: None,
+            resources: None,
+            service_account_name: None,
+        };
+        assert_eq!(spec.display_name(), "my-migrations");
+    }
+
+    #[test]
+    fn test_migrator_spec_display_name_fallback() {
+        let spec = MigratorSpec {
+            name: None,
+            migrator_type: crate::migrator::MigratorType::Goose,
+            deployment_ref: DeploymentRef {
+                name: "backend".to_string(),
+                container_name: None,
+            },
+            image_override: None,
+            command: None,
+            args: None,
+            working_dir: None,
+            migrations_path: None,
+            env: None,
+            tool_config: None,
+            secret_refs: None,
+            env_from: None,
+            resources: None,
+            service_account_name: None,
+        };
+        assert_eq!(spec.display_name(), "goose");
+    }
+
+    #[test]
+    fn test_has_image_override() {
+        let mut spec = MigratorSpec {
+            name: None,
+            migrator_type: crate::migrator::MigratorType::Sqlx,
+            deployment_ref: DeploymentRef {
+                name: "backend".to_string(),
+                container_name: None,
+            },
+            image_override: None,
+            command: None,
+            args: None,
+            working_dir: None,
+            migrations_path: None,
+            env: None,
+            tool_config: None,
+            secret_refs: None,
+            env_from: None,
+            resources: None,
+            service_account_name: None,
+        };
+        assert!(!spec.has_image_override());
+        spec.image_override = Some("my-image:latest".to_string());
+        assert!(spec.has_image_override());
+    }
+
+    #[test]
+    fn test_checksum_mode_serde_roundtrip() {
+        for mode in [
+            ChecksumMode::Strict,
+            ChecksumMode::AutoReconcile,
+            ChecksumMode::PreFlight,
+        ] {
+            let serialized = serde_json::to_string(&mode).unwrap();
+            let deserialized: ChecksumMode = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(mode, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_migration_phase_equality() {
+        assert_eq!(MigrationPhase::Pending, MigrationPhase::Pending);
+        assert_ne!(MigrationPhase::Pending, MigrationPhase::Ready);
+    }
+}
+
+impl MigratorSpec {
 
     /// Get the display name for this migrator
     ///
