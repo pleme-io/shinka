@@ -302,3 +302,292 @@ fn truncate_label(s: &str, max_len: usize) -> String {
         s[..max_len].to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crd::{
+        CnpgClusterRef, DatabaseMigrationSpec, DatabaseSpec, DeploymentRef, MigratorSpec,
+        SafetySpec, TimeoutSpec,
+    };
+
+    fn make_test_migration() -> DatabaseMigration {
+        DatabaseMigration {
+            metadata: ObjectMeta {
+                name: Some("test-mig".to_string()),
+                namespace: Some("test-ns".to_string()),
+                ..Default::default()
+            },
+            spec: DatabaseMigrationSpec {
+                database: DatabaseSpec {
+                    cnpg_cluster_ref: CnpgClusterRef {
+                        name: "cluster".to_string(),
+                        database: None,
+                    },
+                },
+                migrator: Some(MigratorSpec {
+                    name: None,
+                    migrator_type: MigratorType::Sqlx,
+                    deployment_ref: DeploymentRef {
+                        name: "backend".to_string(),
+                        container_name: None,
+                    },
+                    image_override: None,
+                    command: None,
+                    args: None,
+                    working_dir: None,
+                    migrations_path: None,
+                    env: None,
+                    tool_config: None,
+                    secret_refs: None,
+                    env_from: None,
+                    resources: None,
+                    service_account_name: None,
+                }),
+                migrators: None,
+                safety: SafetySpec::default(),
+                timeouts: TimeoutSpec::default(),
+            },
+            status: None,
+        }
+    }
+
+    fn make_test_config() -> MigrationJobConfig {
+        MigrationJobConfig {
+            image: "myapp:v1.0".to_string(),
+            image_tag: "v1.0".to_string(),
+            command: vec!["sqlx".to_string(), "migrate".to_string(), "run".to_string()],
+            args: None,
+            working_dir: None,
+            resources: None,
+            env_from: None,
+            env: None,
+            service_account_name: None,
+            migrator_type: MigratorType::Sqlx,
+            trace_context: None,
+            scheduling: PodScheduling::default(),
+            job_ttl_seconds: 3600,
+            disable_mesh_sidecar: false,
+            mesh_sidecar_annotation_key: "sidecar.istio.io/inject".to_string(),
+            mesh_sidecar_annotation_value: "false".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_short_hash_deterministic() {
+        let h1 = short_hash("v1.0");
+        let h2 = short_hash("v1.0");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_short_hash_different_inputs() {
+        let h1 = short_hash("v1.0");
+        let h2 = short_hash("v2.0");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_short_hash_length() {
+        let h = short_hash("anything");
+        assert_eq!(h.len(), 8);
+    }
+
+    #[test]
+    fn test_truncate_label_short_string() {
+        assert_eq!(truncate_label("short", 63), "short");
+    }
+
+    #[test]
+    fn test_truncate_label_exact_length() {
+        let s = "a".repeat(63);
+        assert_eq!(truncate_label(&s, 63), s);
+    }
+
+    #[test]
+    fn test_truncate_label_long_string() {
+        let s = "a".repeat(100);
+        let result = truncate_label(&s, 63);
+        assert_eq!(result.len(), 63);
+    }
+
+    #[test]
+    fn test_build_migration_job_basic() {
+        let migration = make_test_migration();
+        let config = make_test_config();
+        let job = build_migration_job(&migration, config).unwrap();
+
+        assert!(job.metadata.name.unwrap().starts_with("test-mig-migration-"));
+        assert_eq!(job.metadata.namespace, Some("test-ns".to_string()));
+
+        let labels = job.metadata.labels.unwrap();
+        assert_eq!(labels["app.kubernetes.io/name"], "test-mig");
+        assert_eq!(labels["app.kubernetes.io/component"], "migration");
+        assert_eq!(labels["app.kubernetes.io/managed-by"], "shinka");
+    }
+
+    #[test]
+    fn test_build_migration_job_container_config() {
+        let migration = make_test_migration();
+        let config = make_test_config();
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let spec = job.spec.unwrap();
+        let pod_spec = spec.template.spec.unwrap();
+        assert_eq!(pod_spec.containers.len(), 1);
+
+        let container = &pod_spec.containers[0];
+        assert_eq!(container.name, "migration");
+        assert_eq!(container.image, Some("myapp:v1.0".to_string()));
+        assert_eq!(
+            container.command,
+            Some(vec![
+                "sqlx".to_string(),
+                "migrate".to_string(),
+                "run".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn test_build_migration_job_never_restart() {
+        let migration = make_test_migration();
+        let config = make_test_config();
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let pod_spec = job.spec.unwrap().template.spec.unwrap();
+        assert_eq!(pod_spec.restart_policy, Some("Never".to_string()));
+    }
+
+    #[test]
+    fn test_build_migration_job_backoff_limit_zero() {
+        let migration = make_test_migration();
+        let config = make_test_config();
+        let job = build_migration_job(&migration, config).unwrap();
+
+        assert_eq!(job.spec.unwrap().backoff_limit, Some(0));
+    }
+
+    #[test]
+    fn test_build_migration_job_with_resources() {
+        let migration = make_test_migration();
+        let mut config = make_test_config();
+        config.resources = Some(crate::crd::ResourceRequirements {
+            memory_limit: Some("256Mi".to_string()),
+            cpu_limit: Some("500m".to_string()),
+            memory_request: Some("128Mi".to_string()),
+            cpu_request: Some("100m".to_string()),
+        });
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let container = &job.spec.unwrap().template.spec.unwrap().containers[0];
+        let res = container.resources.as_ref().unwrap();
+        assert!(res.limits.is_some());
+        assert!(res.requests.is_some());
+    }
+
+    #[test]
+    fn test_build_migration_job_with_env() {
+        let migration = make_test_migration();
+        let mut config = make_test_config();
+        let mut env = BTreeMap::new();
+        env.insert("FOO".to_string(), "bar".to_string());
+        config.env = Some(env);
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let container = &job.spec.unwrap().template.spec.unwrap().containers[0];
+        let env_vars = container.env.as_ref().unwrap();
+        assert!(env_vars.iter().any(|e| e.name == "FOO" && e.value == Some("bar".to_string())));
+    }
+
+    #[test]
+    fn test_build_migration_job_with_trace_context() {
+        let migration = make_test_migration();
+        let mut config = make_test_config();
+        config.trace_context = Some(TraceContext {
+            traceparent: "00-abc-def-01".to_string(),
+            tracestate: Some("vendor=data".to_string()),
+        });
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let container = &job.spec.unwrap().template.spec.unwrap().containers[0];
+        let env_vars = container.env.as_ref().unwrap();
+        assert!(env_vars.iter().any(|e| e.name == "TRACEPARENT"));
+        assert!(env_vars.iter().any(|e| e.name == "TRACESTATE"));
+        assert!(env_vars.iter().any(|e| e.name == "OTEL_PROPAGATORS"));
+    }
+
+    #[test]
+    fn test_build_migration_job_with_mesh_sidecar_disabled() {
+        let migration = make_test_migration();
+        let mut config = make_test_config();
+        config.disable_mesh_sidecar = true;
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let annotations = job.metadata.annotations.unwrap();
+        assert_eq!(annotations["sidecar.istio.io/inject"], "false");
+    }
+
+    #[test]
+    fn test_build_migration_job_without_mesh_sidecar_disabled() {
+        let migration = make_test_migration();
+        let config = make_test_config();
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let annotations = job.metadata.annotations.unwrap();
+        assert!(!annotations.contains_key("sidecar.istio.io/inject"));
+    }
+
+    #[test]
+    fn test_build_migration_job_with_service_account() {
+        let migration = make_test_migration();
+        let mut config = make_test_config();
+        config.service_account_name = Some("migration-sa".to_string());
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let pod_spec = job.spec.unwrap().template.spec.unwrap();
+        assert_eq!(
+            pod_spec.service_account_name,
+            Some("migration-sa".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_migration_job_with_scheduling() {
+        let migration = make_test_migration();
+        let mut config = make_test_config();
+        let mut node_selector = BTreeMap::new();
+        node_selector.insert("kubernetes.io/arch".to_string(), "amd64".to_string());
+        config.scheduling = PodScheduling {
+            node_selector: Some(node_selector),
+            tolerations: None,
+            affinity: None,
+        };
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let pod_spec = job.spec.unwrap().template.spec.unwrap();
+        let ns = pod_spec.node_selector.unwrap();
+        assert_eq!(ns["kubernetes.io/arch"], "amd64");
+    }
+
+    #[test]
+    fn test_build_migration_job_with_working_dir() {
+        let migration = make_test_migration();
+        let mut config = make_test_config();
+        config.working_dir = Some("/app".to_string());
+        let job = build_migration_job(&migration, config).unwrap();
+
+        let container = &job.spec.unwrap().template.spec.unwrap().containers[0];
+        assert_eq!(container.working_dir, Some("/app".to_string()));
+    }
+
+    #[test]
+    fn test_build_migration_job_ttl() {
+        let migration = make_test_migration();
+        let mut config = make_test_config();
+        config.job_ttl_seconds = 7200;
+        let job = build_migration_job(&migration, config).unwrap();
+
+        assert_eq!(job.spec.unwrap().ttl_seconds_after_finished, Some(7200));
+    }
+}
