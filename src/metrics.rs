@@ -360,3 +360,198 @@ pub fn set_checksum_mode(namespace: &str, name: &str, mode: &str) {
         .with_label_values(&[namespace, name])
         .set(mode_value);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_migration_phase_known_phases() {
+        set_migration_phase("test-mig", "ns", "Pending");
+        assert_eq!(
+            MIGRATION_PHASE.with_label_values(&["test-mig", "ns"]).get(),
+            0
+        );
+
+        set_migration_phase("test-mig", "ns", "CheckingHealth");
+        assert_eq!(
+            MIGRATION_PHASE.with_label_values(&["test-mig", "ns"]).get(),
+            1
+        );
+
+        set_migration_phase("test-mig", "ns", "WaitingForDatabase");
+        assert_eq!(
+            MIGRATION_PHASE.with_label_values(&["test-mig", "ns"]).get(),
+            2
+        );
+
+        set_migration_phase("test-mig", "ns", "Migrating");
+        assert_eq!(
+            MIGRATION_PHASE.with_label_values(&["test-mig", "ns"]).get(),
+            3
+        );
+
+        set_migration_phase("test-mig", "ns", "Ready");
+        assert_eq!(
+            MIGRATION_PHASE.with_label_values(&["test-mig", "ns"]).get(),
+            4
+        );
+
+        set_migration_phase("test-mig", "ns", "Failed");
+        assert_eq!(
+            MIGRATION_PHASE.with_label_values(&["test-mig", "ns"]).get(),
+            5
+        );
+    }
+
+    #[test]
+    fn test_set_migration_phase_unknown_returns_negative() {
+        set_migration_phase("test-mig-unk", "ns", "BogusPhase");
+        assert_eq!(
+            MIGRATION_PHASE
+                .with_label_values(&["test-mig-unk", "ns"])
+                .get(),
+            -1
+        );
+    }
+
+    #[test]
+    fn test_set_checksum_mode_variants() {
+        set_checksum_mode("ns", "mig", "auto-reconcile");
+        assert_eq!(CHECKSUM_MODE.with_label_values(&["ns", "mig"]).get(), 0);
+
+        set_checksum_mode("ns", "mig", "AutoReconcile");
+        assert_eq!(CHECKSUM_MODE.with_label_values(&["ns", "mig"]).get(), 0);
+
+        set_checksum_mode("ns", "mig", "strict");
+        assert_eq!(CHECKSUM_MODE.with_label_values(&["ns", "mig"]).get(), 1);
+
+        set_checksum_mode("ns", "mig", "Strict");
+        assert_eq!(CHECKSUM_MODE.with_label_values(&["ns", "mig"]).get(), 1);
+
+        set_checksum_mode("ns", "mig", "pre-flight");
+        assert_eq!(CHECKSUM_MODE.with_label_values(&["ns", "mig"]).get(), 2);
+
+        set_checksum_mode("ns", "mig", "PreFlight");
+        assert_eq!(CHECKSUM_MODE.with_label_values(&["ns", "mig"]).get(), 2);
+    }
+
+    #[test]
+    fn test_set_checksum_mode_unknown_defaults_to_zero() {
+        set_checksum_mode("ns", "mig-unk", "something-else");
+        assert_eq!(
+            CHECKSUM_MODE.with_label_values(&["ns", "mig-unk"]).get(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_set_leader_status() {
+        set_leader_status(true);
+        assert_eq!(LEADER_STATUS.get(), 1);
+
+        set_leader_status(false);
+        assert_eq!(LEADER_STATUS.get(), 0);
+    }
+
+    #[test]
+    fn test_gather_returns_non_empty() {
+        init();
+        let output = gather();
+        assert!(!output.is_empty());
+        assert!(!output.starts_with("# Error"));
+    }
+
+    #[test]
+    fn test_record_migration_success_increments_counters() {
+        let name = "test-success-mig";
+        let ns = "test-ns-success";
+        record_migration_start(name, ns);
+        let in_flight_before = MIGRATIONS_IN_FLIGHT.with_label_values(&[ns]).get();
+        assert!(in_flight_before > 0);
+
+        record_migration_success(name, ns, 5.5);
+
+        let total = MIGRATIONS_TOTAL
+            .with_label_values(&[name, ns, "success"])
+            .get();
+        assert!(total > 0);
+    }
+
+    #[test]
+    fn test_record_migration_failure_increments_counters() {
+        let name = "test-fail-mig";
+        let ns = "test-ns-fail";
+        record_migration_start(name, ns);
+        record_migration_failure(name, ns, "sql");
+
+        let total = MIGRATIONS_TOTAL
+            .with_label_values(&[name, ns, "failure"])
+            .get();
+        assert!(total > 0);
+
+        let errors = ERRORS_TOTAL.with_label_values(&[name, ns, "sql"]).get();
+        assert!(errors > 0);
+    }
+
+    #[test]
+    fn test_record_retry_increments() {
+        record_retry("retry-mig", "retry-ns");
+        let count = RETRY_ATTEMPTS
+            .with_label_values(&["retry-mig", "retry-ns"])
+            .get();
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_record_auto_retry() {
+        record_auto_retry("auto-mig", "auto-ns");
+        let count = MIGRATION_AUTO_RETRIES_TOTAL
+            .with_label_values(&["auto-ns", "auto-mig"])
+            .get();
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_record_database_health() {
+        record_database_health("cluster1", "ns1", true);
+        assert_eq!(DATABASE_HEALTH.with_label_values(&["cluster1", "ns1"]).get(), 1);
+
+        record_database_health("cluster1", "ns1", false);
+        assert_eq!(DATABASE_HEALTH.with_label_values(&["cluster1", "ns1"]).get(), 0);
+    }
+
+    #[test]
+    fn test_record_reconciliation() {
+        record_reconciliation("success");
+        let count = RECONCILIATIONS_TOTAL.with_label_values(&["success"]).get();
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_record_checksum_reconciliation() {
+        record_checksum_reconciliation("cs-ns", "cs-mig", 42);
+        let count = CHECKSUM_RECONCILIATIONS_TOTAL
+            .with_label_values(&["cs-ns", "cs-mig", "42"])
+            .get();
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_record_checksum_mismatch() {
+        record_checksum_mismatch("mm-ns", "mm-mig", 7, "reconciled");
+        let count = CHECKSUM_MISMATCHES_TOTAL
+            .with_label_values(&["mm-ns", "mm-mig", "7", "reconciled"])
+            .get();
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_record_migration_rollback() {
+        record_migration_rollback("rb-ns", "rb-mig", "sql_error");
+        let count = MIGRATION_ROLLBACKS_TOTAL
+            .with_label_values(&["rb-ns", "rb-mig", "sql_error"])
+            .get();
+        assert!(count > 0);
+    }
+}
