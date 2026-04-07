@@ -397,3 +397,253 @@ fn get_logs_tail(logs: &str, n: usize) -> String {
     let start = if lines.len() > n { lines.len() - n } else { 0 };
     lines[start..].join("\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use k8s_openapi::api::batch::v1::{JobCondition, JobStatus as K8sJobStatus};
+
+    #[test]
+    fn test_extract_error_from_logs_with_error_keyword() {
+        let logs = "Starting migration\nERROR: relation \"users\" already exists\nDone";
+        let result = extract_error_from_logs(logs);
+        assert!(result.is_some());
+        let err = result.unwrap();
+        assert!(err.contains("ERROR: relation \"users\" already exists"));
+    }
+
+    #[test]
+    fn test_extract_error_from_logs_with_fatal() {
+        let logs = "Connecting to database\nFATAL: password authentication failed for user \"admin\"\nConnection refused";
+        let result = extract_error_from_logs(logs);
+        assert!(result.is_some());
+        let err = result.unwrap();
+        assert!(err.contains("FATAL:"));
+    }
+
+    #[test]
+    fn test_extract_error_from_logs_with_panic() {
+        let logs = "thread 'main' panicked at 'called Option::unwrap() on a None value'";
+        let result = extract_error_from_logs(logs);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("panicked"));
+    }
+
+    #[test]
+    fn test_extract_error_from_logs_captures_context_lines() {
+        let logs = "line1\nline2\nERROR: something broke\ncontext1\ncontext2\ncontext3\nline7";
+        let result = extract_error_from_logs(logs);
+        assert!(result.is_some());
+        let err = result.unwrap();
+        assert!(err.contains("ERROR: something broke"));
+        assert!(err.contains("context1"));
+        assert!(err.contains("context2"));
+        assert!(err.contains("context3"));
+    }
+
+    #[test]
+    fn test_extract_error_from_logs_no_errors_returns_last_lines() {
+        let logs = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8";
+        let result = extract_error_from_logs(logs);
+        assert!(result.is_some());
+        let err = result.unwrap();
+        assert!(err.contains("line4"));
+        assert!(err.contains("line8"));
+    }
+
+    #[test]
+    fn test_extract_error_from_logs_empty() {
+        let result = extract_error_from_logs("");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_error_from_logs_short_no_errors() {
+        let logs = "ok\ndone";
+        let result = extract_error_from_logs(logs);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("ok"));
+    }
+
+    #[test]
+    fn test_extract_error_permission_denied() {
+        let logs = "permission denied for table users";
+        let result = extract_error_from_logs(logs);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("permission denied"));
+    }
+
+    #[test]
+    fn test_extract_error_connection_refused() {
+        let logs = "could not connect: connection refused\nretrying in 5s";
+        let result = extract_error_from_logs(logs);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("connection refused"));
+    }
+
+    #[test]
+    fn test_extract_error_syntax_error() {
+        let logs = "ERROR: syntax error at or near \"SELEC\"\nLINE 1: SELEC * FROM users";
+        let result = extract_error_from_logs(logs);
+        assert!(result.is_some());
+        let err = result.unwrap();
+        assert!(err.contains("syntax error"));
+    }
+
+    #[test]
+    fn test_extract_error_limits_to_10_lines() {
+        let mut lines = Vec::new();
+        for i in 0..20 {
+            lines.push(format!("ERROR: issue number {}", i));
+        }
+        let logs = lines.join("\n");
+        let result = extract_error_from_logs(&logs);
+        assert!(result.is_some());
+        let err = result.unwrap();
+        let error_line_count = err.lines().count();
+        assert!(error_line_count <= 10, "Expected at most 10 lines, got {}", error_line_count);
+    }
+
+    #[test]
+    fn test_get_logs_tail_fewer_lines_than_n() {
+        let logs = "line1\nline2\nline3";
+        let result = get_logs_tail(logs, 10);
+        assert_eq!(result, "line1\nline2\nline3");
+    }
+
+    #[test]
+    fn test_get_logs_tail_more_lines_than_n() {
+        let logs = "line1\nline2\nline3\nline4\nline5";
+        let result = get_logs_tail(logs, 2);
+        assert_eq!(result, "line4\nline5");
+    }
+
+    #[test]
+    fn test_get_logs_tail_exact_n() {
+        let logs = "line1\nline2\nline3";
+        let result = get_logs_tail(logs, 3);
+        assert_eq!(result, "line1\nline2\nline3");
+    }
+
+    #[test]
+    fn test_get_logs_tail_empty() {
+        let result = get_logs_tail("", 5);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_check_job_completion_no_status() {
+        let job = Job {
+            status: None,
+            ..Default::default()
+        };
+        assert!(check_job_completion(&job).is_none());
+    }
+
+    #[test]
+    fn test_check_job_completion_running() {
+        let job = Job {
+            status: Some(K8sJobStatus {
+                succeeded: Some(0),
+                failed: Some(0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(check_job_completion(&job).is_none());
+    }
+
+    #[test]
+    fn test_check_job_completion_succeeded() {
+        let job = Job {
+            status: Some(K8sJobStatus {
+                succeeded: Some(1),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = check_job_completion(&job);
+        assert!(result.is_some());
+        let (success, error) = result.unwrap();
+        assert!(success);
+        assert!(error.is_none());
+    }
+
+    #[test]
+    fn test_check_job_completion_failed_with_condition() {
+        let job = Job {
+            status: Some(K8sJobStatus {
+                failed: Some(1),
+                conditions: Some(vec![JobCondition {
+                    type_: "Failed".to_string(),
+                    message: Some("BackoffLimitExceeded".to_string()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = check_job_completion(&job);
+        assert!(result.is_some());
+        let (success, error) = result.unwrap();
+        assert!(!success);
+        assert_eq!(error, Some("BackoffLimitExceeded".to_string()));
+    }
+
+    #[test]
+    fn test_check_job_completion_failed_no_condition() {
+        let job = Job {
+            status: Some(K8sJobStatus {
+                failed: Some(1),
+                conditions: None,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = check_job_completion(&job);
+        assert!(result.is_some());
+        let (success, error) = result.unwrap();
+        assert!(!success);
+        assert_eq!(error, Some("Job failed".to_string()));
+    }
+
+    #[test]
+    fn test_check_job_completion_failed_no_matching_condition() {
+        let job = Job {
+            status: Some(K8sJobStatus {
+                failed: Some(1),
+                conditions: Some(vec![JobCondition {
+                    type_: "Complete".to_string(),
+                    message: Some("done".to_string()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = check_job_completion(&job);
+        assert!(result.is_some());
+        let (success, error) = result.unwrap();
+        assert!(!success);
+        assert_eq!(error, Some("Job failed".to_string()));
+    }
+
+    #[test]
+    fn test_is_not_found() {
+        let err = kube::Error::Api(kube::error::ErrorResponse {
+            code: 404,
+            message: "not found".to_string(),
+            reason: "NotFound".to_string(),
+            status: "Failure".to_string(),
+        });
+        assert!(is_not_found(&err));
+
+        let err = kube::Error::Api(kube::error::ErrorResponse {
+            code: 500,
+            message: "internal".to_string(),
+            reason: "InternalError".to_string(),
+            status: "Failure".to_string(),
+        });
+        assert!(!is_not_found(&err));
+    }
+}

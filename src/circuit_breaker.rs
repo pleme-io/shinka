@@ -403,4 +403,152 @@ mod tests {
             cb.execute(async { Err::<i32, _>("error") }).await;
         assert!(matches!(result, Err(CircuitBreakerError::Inner("error"))));
     }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_execute_rejected_when_open() {
+        let config = CircuitBreakerConfig::new("test-exec-open").with_failure_threshold(1);
+        let cb = CircuitBreaker::new(config);
+
+        cb.record_failure().await;
+        assert_eq!(cb.state().await, CircuitState::Open);
+
+        let result: Result<i32, CircuitBreakerError<&str>> =
+            cb.execute(async { Ok::<_, &str>(99) }).await;
+        assert!(matches!(result, Err(CircuitBreakerError::Open)));
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_half_open_failure_reopens() {
+        let config = CircuitBreakerConfig::new("test-half-open-reopen")
+            .with_failure_threshold(1)
+            .with_open_timeout(Duration::from_millis(10));
+        let cb = CircuitBreaker::new(config);
+
+        cb.record_failure().await;
+        assert_eq!(cb.state().await, CircuitState::Open);
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(cb.state().await, CircuitState::HalfOpen);
+
+        cb.record_failure().await;
+        assert_eq!(cb.state().await, CircuitState::Open);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_half_open_max_requests() {
+        let config = CircuitBreakerConfig::new("test-half-open-max")
+            .with_failure_threshold(1)
+            .with_open_timeout(Duration::from_millis(10));
+        let mut config = config;
+        config.half_open_max_requests = 1;
+        let cb = CircuitBreaker::new(config);
+
+        cb.record_failure().await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        assert!(cb.should_allow().await);
+        assert!(!cb.should_allow().await);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_force_open() {
+        let cb = CircuitBreaker::new(CircuitBreakerConfig::new("test-force-open"));
+        assert_eq!(cb.state().await, CircuitState::Closed);
+
+        cb.force_open().await;
+        assert_eq!(cb.state().await, CircuitState::Open);
+        assert!(!cb.should_allow().await);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_force_closed() {
+        let config = CircuitBreakerConfig::new("test-force-closed").with_failure_threshold(1);
+        let cb = CircuitBreaker::new(config);
+
+        cb.record_failure().await;
+        assert_eq!(cb.state().await, CircuitState::Open);
+
+        cb.force_closed().await;
+        assert_eq!(cb.state().await, CircuitState::Closed);
+        assert!(cb.should_allow().await);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_stats() {
+        let cb = CircuitBreaker::new(CircuitBreakerConfig::new("test-stats"));
+
+        cb.should_allow().await;
+        cb.should_allow().await;
+        cb.record_failure().await;
+
+        let stats = cb.stats();
+        assert_eq!(stats.name, "test-stats");
+        assert_eq!(stats.requests_total, 2);
+        assert_eq!(stats.failures_total, 1);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_success_resets_failure_count() {
+        let config = CircuitBreakerConfig::new("test-reset").with_failure_threshold(3);
+        let cb = CircuitBreaker::new(config);
+
+        cb.record_failure().await;
+        cb.record_failure().await;
+        cb.record_success().await;
+        cb.record_failure().await;
+        cb.record_failure().await;
+        assert_eq!(cb.state().await, CircuitState::Closed);
+    }
+
+    #[test]
+    fn test_circuit_state_display() {
+        assert_eq!(CircuitState::Closed.to_string(), "closed");
+        assert_eq!(CircuitState::Open.to_string(), "open");
+        assert_eq!(CircuitState::HalfOpen.to_string(), "half_open");
+    }
+
+    #[test]
+    fn test_circuit_breaker_error_display() {
+        let err: CircuitBreakerError<String> = CircuitBreakerError::Open;
+        assert_eq!(format!("{}", err), "circuit breaker is open");
+
+        let err: CircuitBreakerError<String> =
+            CircuitBreakerError::Inner("inner error".to_string());
+        assert_eq!(format!("{}", err), "inner error");
+    }
+
+    #[test]
+    fn test_circuit_breaker_error_source() {
+        use std::error::Error;
+
+        let err: CircuitBreakerError<std::io::Error> = CircuitBreakerError::Open;
+        assert!(err.source().is_none());
+
+        let inner = std::io::Error::new(std::io::ErrorKind::Other, "test");
+        let err: CircuitBreakerError<std::io::Error> = CircuitBreakerError::Inner(inner);
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn test_circuit_breaker_config_builder() {
+        let config = CircuitBreakerConfig::new("builder")
+            .with_failure_threshold(10)
+            .with_success_threshold(5)
+            .with_open_timeout(Duration::from_secs(120));
+
+        assert_eq!(config.name, "builder");
+        assert_eq!(config.failure_threshold, 10);
+        assert_eq!(config.success_threshold, 5);
+        assert_eq!(config.open_timeout, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn test_circuit_breaker_config_default() {
+        let config = CircuitBreakerConfig::default();
+        assert_eq!(config.name, "default");
+        assert_eq!(config.failure_threshold, 5);
+        assert_eq!(config.success_threshold, 2);
+        assert_eq!(config.open_timeout, Duration::from_secs(30));
+        assert_eq!(config.half_open_max_requests, 3);
+    }
 }

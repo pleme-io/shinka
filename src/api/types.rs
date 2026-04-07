@@ -642,3 +642,288 @@ impl From<&CrdCondition> for ConditionInfo {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crd::{
+        CnpgClusterRef, DatabaseMigrationSpec, DatabaseSpec, DeploymentRef, MigratorSpec,
+        SafetySpec, TimeoutSpec,
+    };
+
+    fn make_api_error_test_migration() -> DatabaseMigration {
+        DatabaseMigration {
+            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                name: Some("test-mig".to_string()),
+                namespace: Some("test-ns".to_string()),
+                uid: Some("uid-123".to_string()),
+                creation_timestamp: Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
+                    Utc::now(),
+                )),
+                ..Default::default()
+            },
+            spec: DatabaseMigrationSpec {
+                database: DatabaseSpec {
+                    cnpg_cluster_ref: CnpgClusterRef {
+                        name: "my-cluster".to_string(),
+                        database: Some("mydb".to_string()),
+                    },
+                },
+                migrator: Some(MigratorSpec {
+                    name: None,
+                    migrator_type: crate::migrator::MigratorType::Sqlx,
+                    deployment_ref: DeploymentRef {
+                        name: "backend".to_string(),
+                        container_name: None,
+                    },
+                    image_override: None,
+                    command: None,
+                    args: None,
+                    working_dir: None,
+                    migrations_path: None,
+                    env: None,
+                    tool_config: None,
+                    secret_refs: None,
+                    env_from: None,
+                    resources: None,
+                    service_account_name: None,
+                }),
+                migrators: None,
+                safety: SafetySpec::default(),
+                timeouts: TimeoutSpec::default(),
+            },
+            status: Some(DatabaseMigrationStatus {
+                phase: Some(crate::crd::MigrationPhase::Ready),
+                last_migration: Some(LastMigration {
+                    image_tag: "v1.0".to_string(),
+                    success: true,
+                    duration: Some("30s".to_string()),
+                    completed_at: Some(Utc::now()),
+                    error: None,
+                }),
+                retry_count: Some(1),
+                current_job: Some("test-job".to_string()),
+                observed_generation: Some(5),
+                conditions: Some(vec![CrdCondition::ready(
+                    5,
+                    "MigrationSucceeded",
+                    "Migration done",
+                )]),
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[test]
+    fn test_api_error_not_found() {
+        let err = ApiError::not_found("Cluster", "my-cluster");
+        assert_eq!(err.code, "NOT_FOUND");
+        assert_eq!(err.status, 404);
+        assert!(err.message.contains("my-cluster"));
+    }
+
+    #[test]
+    fn test_api_error_invalid_argument() {
+        let err = ApiError::invalid_argument("bad param");
+        assert_eq!(err.code, "INVALID_ARGUMENT");
+        assert_eq!(err.status, 400);
+    }
+
+    #[test]
+    fn test_api_error_internal() {
+        let err = ApiError::internal("something went wrong");
+        assert_eq!(err.code, "INTERNAL");
+        assert_eq!(err.status, 500);
+    }
+
+    #[test]
+    fn test_api_error_permission_denied() {
+        let err = ApiError::permission_denied("not allowed");
+        assert_eq!(err.code, "PERMISSION_DENIED");
+        assert_eq!(err.status, 403);
+    }
+
+    #[test]
+    fn test_api_error_already_exists() {
+        let err = ApiError::already_exists("Migration", "my-mig");
+        assert_eq!(err.code, "ALREADY_EXISTS");
+        assert_eq!(err.status, 409);
+        assert!(err.message.contains("my-mig"));
+    }
+
+    #[test]
+    fn test_api_error_failed_precondition() {
+        let err = ApiError::failed_precondition("migration in progress");
+        assert_eq!(err.code, "FAILED_PRECONDITION");
+        assert_eq!(err.status, 412);
+    }
+
+    #[test]
+    fn test_api_error_display() {
+        let err = ApiError::not_found("Cluster", "foo");
+        let display = format!("{}", err);
+        assert!(display.contains("NOT_FOUND"));
+        assert!(display.contains("foo"));
+    }
+
+    #[test]
+    fn test_api_error_from_crate_error_cluster_not_found() {
+        let err = crate::Error::ClusterNotFound {
+            name: "pg-cluster".to_string(),
+            namespace: "prod".to_string(),
+        };
+        let api_err: ApiError = err.into();
+        assert_eq!(api_err.code, "NOT_FOUND");
+        assert!(api_err.message.contains("pg-cluster"));
+    }
+
+    #[test]
+    fn test_api_error_from_crate_error_deployment_not_found() {
+        let err = crate::Error::DeploymentNotFound {
+            name: "backend".to_string(),
+            namespace: "staging".to_string(),
+        };
+        let api_err: ApiError = err.into();
+        assert_eq!(api_err.code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn test_api_error_from_crate_error_configuration() {
+        let err = crate::Error::Configuration("bad config".to_string());
+        let api_err: ApiError = err.into();
+        assert_eq!(api_err.code, "INVALID_ARGUMENT");
+    }
+
+    #[test]
+    fn test_api_error_from_crate_error_migration_failed() {
+        let err = crate::Error::MigrationFailed {
+            name: "mig1".to_string(),
+            reason: "SQL error".to_string(),
+        };
+        let api_err: ApiError = err.into();
+        assert_eq!(api_err.code, "FAILED_PRECONDITION");
+    }
+
+    #[test]
+    fn test_api_error_from_crate_error_internal() {
+        let err = crate::Error::Internal("something broke".to_string());
+        let api_err: ApiError = err.into();
+        assert_eq!(api_err.code, "INTERNAL");
+    }
+
+    #[test]
+    fn test_migration_resource_from_database_migration() {
+        let dm = make_api_error_test_migration();
+        let resource = MigrationResource::from(&dm);
+
+        assert_eq!(resource.name, "test-mig");
+        assert_eq!(resource.namespace, "test-ns");
+        assert_eq!(resource.uid, "uid-123");
+        assert_eq!(resource.spec.cnpg_cluster, "my-cluster");
+        assert_eq!(resource.spec.database, Some("mydb".to_string()));
+        assert_eq!(resource.spec.migrator_type, "sqlx");
+        assert_eq!(resource.spec.deployment_ref, "backend");
+        assert!(resource.spec.require_healthy_cluster);
+        assert_eq!(resource.spec.max_retries, 3);
+        assert_eq!(resource.status.phase, "Ready");
+        assert_eq!(resource.status.retry_count, 1);
+        assert_eq!(resource.status.current_job, Some("test-job".to_string()));
+        assert_eq!(resource.conditions.len(), 1);
+        assert_eq!(resource.conditions[0].condition_type, "Ready");
+    }
+
+    #[test]
+    fn test_migration_resource_from_database_migration_no_status() {
+        let mut dm = make_api_error_test_migration();
+        dm.status = None;
+        let resource = MigrationResource::from(&dm);
+        assert_eq!(resource.status.phase, "Unknown");
+        assert_eq!(resource.status.retry_count, 0);
+        assert!(resource.conditions.is_empty());
+    }
+
+    #[test]
+    fn test_migration_status_summary_from() {
+        let status = DatabaseMigrationStatus {
+            phase: Some(crate::crd::MigrationPhase::Failed),
+            retry_count: Some(2),
+            current_job: Some("job-xyz".to_string()),
+            observed_generation: Some(10),
+            ..Default::default()
+        };
+        let summary = MigrationStatusSummary::from(&status);
+        assert_eq!(summary.phase, "Failed");
+        assert_eq!(summary.retry_count, 2);
+        assert_eq!(summary.current_job, Some("job-xyz".to_string()));
+        assert_eq!(summary.observed_generation, 10);
+    }
+
+    #[test]
+    fn test_last_migration_info_from() {
+        let lm = LastMigration {
+            image_tag: "sha256:abc123".to_string(),
+            success: false,
+            duration: Some("2m 30s".to_string()),
+            completed_at: Some(Utc::now()),
+            error: Some("SQL error".to_string()),
+        };
+        let info = LastMigrationInfo::from(&lm);
+        assert_eq!(info.image_tag, "sha256:abc123");
+        assert!(!info.success);
+        assert!(info.duration_seconds.is_some());
+        assert_eq!(info.error, Some("SQL error".to_string()));
+    }
+
+    #[test]
+    fn test_last_migration_info_from_no_duration() {
+        let lm = LastMigration {
+            image_tag: "v1.0".to_string(),
+            success: true,
+            duration: None,
+            completed_at: None,
+            error: None,
+        };
+        let info = LastMigrationInfo::from(&lm);
+        assert!(info.duration_seconds.is_none());
+    }
+
+    #[test]
+    fn test_condition_info_from() {
+        let cond = CrdCondition::ready(5, "Ready", "All good");
+        let info = ConditionInfo::from(&cond);
+        assert_eq!(info.condition_type, "Ready");
+        assert_eq!(info.status, "True");
+        assert_eq!(info.reason, Some("Ready".to_string()));
+        assert_eq!(info.message, Some("All good".to_string()));
+    }
+
+    #[test]
+    fn test_event_type_display() {
+        assert_eq!(EventType::Added.to_string(), "ADDED");
+        assert_eq!(EventType::Modified.to_string(), "MODIFIED");
+        assert_eq!(EventType::Deleted.to_string(), "DELETED");
+    }
+
+    #[test]
+    fn test_event_type_serde_roundtrip() {
+        for event in [EventType::Added, EventType::Modified, EventType::Deleted] {
+            let serialized = serde_json::to_string(&event).unwrap();
+            let deserialized: EventType = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(event, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_default_await_timeout() {
+        assert_eq!(default_await_timeout(), 600);
+    }
+
+    #[test]
+    fn test_migration_filter_default() {
+        let filter = MigrationFilter::default();
+        assert!(filter.namespace.is_none());
+        assert!(filter.label_selector.is_empty());
+        assert!(filter.phases.is_empty());
+        assert!(filter.limit.is_none());
+    }
+}

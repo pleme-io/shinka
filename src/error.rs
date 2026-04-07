@@ -311,6 +311,83 @@ mod tests {
     }
 
     #[test]
+    fn test_error_category_all_variants() {
+        let test_cases: Vec<(Error, &str)> = vec![
+            (
+                Error::WatchError {
+                    kind: "Job".into(),
+                    message: "timeout".into(),
+                },
+                "kubernetes",
+            ),
+            (
+                Error::ClusterNotHealthy {
+                    name: "pg".into(),
+                    reason: "not ready".into(),
+                },
+                "database",
+            ),
+            (
+                Error::MigrationTimeout {
+                    name: "m".into(),
+                    duration: Duration::from_secs(300),
+                },
+                "migration",
+            ),
+            (
+                Error::MaxRetriesExceeded {
+                    name: "m".into(),
+                    max_retries: 3,
+                },
+                "migration",
+            ),
+            (
+                Error::PreFlightValidationFailed {
+                    count: 2,
+                    details: "mismatch".into(),
+                },
+                "migration",
+            ),
+            (
+                Error::DeploymentNotFound {
+                    name: "backend".into(),
+                    namespace: "ns".into(),
+                },
+                "migration",
+            ),
+            (
+                Error::NoContainerImage {
+                    name: "backend".into(),
+                },
+                "migration",
+            ),
+            (Error::InvalidConfig("bad".into()), "configuration"),
+            (Error::Configuration("bad".into()), "configuration"),
+            (Error::MissingField("field".into()), "configuration"),
+            (Error::InvalidTimeout("not a number".into()), "configuration"),
+            (Error::Internal("bug".into()), "internal"),
+            (Error::Finalizer("fail".into()), "internal"),
+            (
+                Error::ResourceNotFound {
+                    kind: "Job".into(),
+                    name: "job1".into(),
+                    namespace: "ns".into(),
+                },
+                "kubernetes",
+            ),
+        ];
+
+        for (err, expected_cat) in test_cases {
+            assert_eq!(
+                err.category(),
+                expected_cat,
+                "Wrong category for {:?}",
+                err
+            );
+        }
+    }
+
+    #[test]
     fn test_error_is_transient() {
         assert!(Error::ClusterNotHealthy {
             name: "test".into(),
@@ -325,9 +402,73 @@ mod tests {
     }
 
     #[test]
+    fn test_error_is_transient_all_transient_variants() {
+        let transient_errors = vec![
+            Error::ClusterNotHealthy {
+                name: "pg".into(),
+                reason: "down".into(),
+            },
+            Error::MigrationTimeout {
+                name: "m".into(),
+                duration: Duration::from_secs(60),
+            },
+            Error::WatchError {
+                kind: "Job".into(),
+                message: "gone".into(),
+            },
+        ];
+        for err in transient_errors {
+            assert!(err.is_transient(), "{:?} should be transient", err);
+        }
+    }
+
+    #[test]
+    fn test_error_is_permanent_all_permanent_variants() {
+        let permanent_errors = vec![
+            Error::ResourceNotFound {
+                kind: "Job".into(),
+                name: "j".into(),
+                namespace: "ns".into(),
+            },
+            Error::ClusterNotFound {
+                name: "c".into(),
+                namespace: "ns".into(),
+            },
+            Error::DeploymentNotFound {
+                name: "d".into(),
+                namespace: "ns".into(),
+            },
+            Error::NoContainerImage {
+                name: "d".into(),
+            },
+            Error::InvalidConfig("bad".into()),
+            Error::Configuration("bad".into()),
+            Error::MissingField("f".into()),
+            Error::InvalidTimeout("x".into()),
+            Error::MaxRetriesExceeded {
+                name: "m".into(),
+                max_retries: 3,
+            },
+            Error::PreFlightValidationFailed {
+                count: 1,
+                details: "mismatch".into(),
+            },
+        ];
+        for err in permanent_errors {
+            assert!(err.is_permanent(), "{:?} should be permanent", err);
+        }
+    }
+
+    #[test]
+    fn test_error_not_transient_and_not_permanent() {
+        let err = Error::Internal("bug".into());
+        assert!(!err.is_transient());
+        assert!(!err.is_permanent());
+    }
+
+    #[test]
     fn test_error_help_not_empty() {
-        // All error types should have non-empty help text
-        let errors = vec![
+        let errors: Vec<Error> = vec![
             Error::Internal("test".into()),
             Error::Configuration("test".into()),
             Error::ClusterNotFound {
@@ -337,6 +478,42 @@ mod tests {
             Error::MigrationFailed {
                 name: "test".into(),
                 reason: "test error".into(),
+            },
+            Error::MigrationTimeout {
+                name: "t".into(),
+                duration: Duration::from_secs(60),
+            },
+            Error::MaxRetriesExceeded {
+                name: "t".into(),
+                max_retries: 3,
+            },
+            Error::PreFlightValidationFailed {
+                count: 1,
+                details: "d".into(),
+            },
+            Error::DeploymentNotFound {
+                name: "d".into(),
+                namespace: "ns".into(),
+            },
+            Error::NoContainerImage {
+                name: "d".into(),
+            },
+            Error::InvalidConfig("bad".into()),
+            Error::MissingField("f".into()),
+            Error::InvalidTimeout("x".into()),
+            Error::Finalizer("fail".into()),
+            Error::ResourceNotFound {
+                kind: "Job".into(),
+                name: "j".into(),
+                namespace: "ns".into(),
+            },
+            Error::WatchError {
+                kind: "Pod".into(),
+                message: "gone".into(),
+            },
+            Error::ClusterNotHealthy {
+                name: "pg".into(),
+                reason: "down".into(),
             },
         ];
         for err in errors {
@@ -365,5 +542,48 @@ mod tests {
             .requeue_duration(),
             Duration::from_secs(10)
         );
+    }
+
+    #[test]
+    fn test_error_requeue_duration_all_variants() {
+        assert_eq!(
+            Error::MigrationTimeout {
+                name: "m".into(),
+                duration: Duration::from_secs(60)
+            }
+            .requeue_duration(),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            Error::WatchError {
+                kind: "Job".into(),
+                message: "gone".into()
+            }
+            .requeue_duration(),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            Error::Internal("bug".into()).requeue_duration(),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn test_error_display_formats() {
+        let err = Error::ClusterNotFound {
+            name: "my-cluster".into(),
+            namespace: "prod".into(),
+        };
+        let s = format!("{}", err);
+        assert!(s.contains("my-cluster"));
+        assert!(s.contains("prod"));
+
+        let err = Error::MigrationTimeout {
+            name: "mig1".into(),
+            duration: Duration::from_secs(300),
+        };
+        let s = format!("{}", err);
+        assert!(s.contains("mig1"));
+        assert!(s.contains("300"));
     }
 }
