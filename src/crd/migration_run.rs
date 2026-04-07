@@ -240,11 +240,165 @@ pub use crate::util::format_duration;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+
+    fn make_run(status: Option<MigrationRunStatus>) -> MigrationRun {
+        MigrationRun {
+            metadata: ObjectMeta {
+                name: Some("test-run".to_string()),
+                namespace: Some("test-ns".to_string()),
+                ..Default::default()
+            },
+            spec: MigrationRunSpec {
+                migration_ref: MigrationRef {
+                    name: "my-migration".to_string(),
+                },
+                image_tag: "v1.0".to_string(),
+                attempt: 1,
+                migrator_type: Some("sqlx".to_string()),
+                command: None,
+                is_retry: false,
+                previous_image_tag: None,
+                trace_parent: None,
+            },
+            status,
+        }
+    }
 
     #[test]
     fn test_phase_display() {
         assert_eq!(format!("{}", MigrationRunPhase::Pending), "Pending");
+        assert_eq!(format!("{}", MigrationRunPhase::Running), "Running");
         assert_eq!(format!("{}", MigrationRunPhase::Succeeded), "Succeeded");
         assert_eq!(format!("{}", MigrationRunPhase::Failed), "Failed");
+        assert_eq!(format!("{}", MigrationRunPhase::Cancelled), "Cancelled");
+    }
+
+    #[test]
+    fn test_namespace_or_default() {
+        let run = make_run(None);
+        assert_eq!(run.namespace_or_default(), "test-ns");
+
+        let mut run2 = make_run(None);
+        run2.metadata.namespace = None;
+        assert_eq!(run2.namespace_or_default(), "default");
+    }
+
+    #[test]
+    fn test_name_or_default() {
+        let run = make_run(None);
+        assert_eq!(run.name_or_default(), "test-run");
+
+        let mut run2 = make_run(None);
+        run2.metadata.name = None;
+        assert_eq!(run2.name_or_default(), "unknown");
+    }
+
+    #[test]
+    fn test_is_complete_succeeded() {
+        let run = make_run(Some(MigrationRunStatus {
+            phase: Some(MigrationRunPhase::Succeeded),
+            ..Default::default()
+        }));
+        assert!(run.is_complete());
+    }
+
+    #[test]
+    fn test_is_complete_failed() {
+        let run = make_run(Some(MigrationRunStatus {
+            phase: Some(MigrationRunPhase::Failed),
+            ..Default::default()
+        }));
+        assert!(run.is_complete());
+    }
+
+    #[test]
+    fn test_is_complete_cancelled() {
+        let run = make_run(Some(MigrationRunStatus {
+            phase: Some(MigrationRunPhase::Cancelled),
+            ..Default::default()
+        }));
+        assert!(run.is_complete());
+    }
+
+    #[test]
+    fn test_is_complete_running() {
+        let run = make_run(Some(MigrationRunStatus {
+            phase: Some(MigrationRunPhase::Running),
+            ..Default::default()
+        }));
+        assert!(!run.is_complete());
+    }
+
+    #[test]
+    fn test_is_complete_pending() {
+        let run = make_run(Some(MigrationRunStatus {
+            phase: Some(MigrationRunPhase::Pending),
+            ..Default::default()
+        }));
+        assert!(!run.is_complete());
+    }
+
+    #[test]
+    fn test_is_complete_no_status() {
+        let run = make_run(None);
+        assert!(!run.is_complete());
+    }
+
+    #[test]
+    fn test_is_complete_no_phase() {
+        let run = make_run(Some(MigrationRunStatus {
+            phase: None,
+            ..Default::default()
+        }));
+        assert!(!run.is_complete());
+    }
+
+    #[test]
+    fn test_is_success() {
+        let run = make_run(Some(MigrationRunStatus {
+            phase: Some(MigrationRunPhase::Succeeded),
+            ..Default::default()
+        }));
+        assert!(run.is_success());
+
+        let run2 = make_run(Some(MigrationRunStatus {
+            phase: Some(MigrationRunPhase::Failed),
+            ..Default::default()
+        }));
+        assert!(!run2.is_success());
+    }
+
+    #[test]
+    fn test_is_success_no_status() {
+        let run = make_run(None);
+        assert!(!run.is_success());
+    }
+
+    #[test]
+    fn test_duration_seconds() {
+        let run = make_run(Some(MigrationRunStatus {
+            duration_seconds: Some(42),
+            ..Default::default()
+        }));
+        assert_eq!(run.duration_seconds(), Some(42));
+    }
+
+    #[test]
+    fn test_duration_seconds_none() {
+        let run = make_run(None);
+        assert_eq!(run.duration_seconds(), None);
+    }
+
+    #[test]
+    fn test_default_phase_is_pending() {
+        let phase = MigrationRunPhase::default();
+        assert_eq!(phase, MigrationRunPhase::Pending);
+    }
+
+    #[test]
+    fn test_phase_equality() {
+        assert_eq!(MigrationRunPhase::Succeeded, MigrationRunPhase::Succeeded);
+        assert_ne!(MigrationRunPhase::Succeeded, MigrationRunPhase::Failed);
     }
 }
