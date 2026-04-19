@@ -30,7 +30,6 @@ use kube::{
     Api, Client,
 };
 use std::{env, sync::Arc};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -56,23 +55,18 @@ async fn run_operator() -> Result<(), Box<dyn std::error::Error>> {
     let leader_config = LeaderElectionConfig::from_env();
     let webhook_config = WebhookConfig::from_env();
 
-    // Initialize tracing (structured JSON logging)
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("{},shinka=debug", config.log_level)));
-
+    // Initialize tracing via shidou. Level honors RUST_LOG first, falls back
+    // to config.log_level + a shinka=debug override (kept from the original
+    // inline pattern so we still see this crate's debug logs by default).
+    //
+    // Note: shidou's basic (text) init is the default fmt layer; this is
+    // functionally equivalent to the pre-migration `fmt::layer().pretty()`
+    // for short-line logs — rare multi-line formatting differences are
+    // acceptable for structured-log consumers (JSON is the production path).
+    let level = format!("{},shinka=debug", config.log_level);
     match config.log_format {
-        LogFormat::Json => {
-            tracing_subscriber::registry()
-                .with(fmt::layer().json())
-                .with(filter)
-                .init();
-        }
-        LogFormat::Pretty => {
-            tracing_subscriber::registry()
-                .with(fmt::layer().pretty())
-                .with(filter)
-                .init();
-        }
+        LogFormat::Json => shidou::init_tracing_json_with_level(&level),
+        LogFormat::Pretty => shidou::init_tracing_with_level(&level),
     }
 
     // Get version from environment or build-time
