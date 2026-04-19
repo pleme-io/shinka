@@ -42,6 +42,9 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"
 
+# Graceful termination (shared drain coordinator across pleme-io daemons)
+tsunagu = { git = "https://github.com/pleme-io/tsunagu" }
+
 # Error handling
 thiserror = "1.0"
 

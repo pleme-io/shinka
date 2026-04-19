@@ -30,7 +30,6 @@ use kube::{
     Api, Client,
 };
 use std::{env, sync::Arc};
-use tokio::signal;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[tokio::main]
@@ -239,13 +238,15 @@ async fn run_operator() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
 
-    // Wait for shutdown signal
+    // Wait for drain signal or controller end, whichever comes first.
+    // tsunagu installs SIGTERM/SIGINT handlers once and hands out tokens.
+    let drain = tsunagu::ShutdownController::install();
     tokio::select! {
         _ = controller => {
             tracing::info!("Controller loop ended");
         }
-        _ = shutdown_signal() => {
-            tracing::info!("Shutdown signal received");
+        _ = drain.token().wait() => {
+            tracing::info!("Drain signal received from tsunagu");
         }
     }
 
@@ -272,31 +273,3 @@ async fn run_operator() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Wait for shutdown signal (SIGTERM or SIGINT)
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {
-            tracing::info!("Received SIGINT (Ctrl+C)");
-        },
-        _ = terminate => {
-            tracing::info!("Received SIGTERM");
-        },
-    }
-}
