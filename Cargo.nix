@@ -299,7 +299,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -324,7 +324,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -1734,11 +1734,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" ];
       };
-      "bitflags 2.11.1" = rec {
+      "bitflags 2.12.1" = rec {
         crateName = "bitflags";
-        version = "2.11.1";
+        version = "2.12.1";
         edition = "2021";
-        sha256 = "1cvqijg3rvwgis20a66vfdxannjsxfy5fgjqkaq3l13gyfcj4lf4";
+        sha256 = "02phhjm7w380zdh8928zf13cfi1bw2qz2ay36ml2jmwmmv8cxmw4";
         authors = [
           "The Rust Project Developers"
         ];
@@ -1900,9 +1900,9 @@ rec {
       };
       "cc" = rec {
         crateName = "cc";
-        version = "1.2.62";
+        version = "1.2.63";
         edition = "2018";
-        sha256 = "164zsxcy2zzvbbh1qpbrsssz8kmria41j4agih47sal3y1cyip51";
+        sha256 = "0zy2bqc4nvj6bv2cipx4h4bn65wf1zqf1fw1hsh64mmvg1hh2vjm";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -2867,7 +2867,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -2876,9 +2876,9 @@ rec {
       };
       "displaydoc" = rec {
         crateName = "displaydoc";
-        version = "0.2.5";
+        version = "0.2.6";
         edition = "2021";
-        sha256 = "1q0alair462j21iiqwrr21iabkfnb13d6x5w95lkdg21q2xrqdlp";
+        sha256 = "0kyxwfbdmagd8afzb2pzja7wj8dhah7smxdsgw00iq8pa2jhmiqs";
         procMacro = true;
         authors = [
           "Jane Lusby <jlusby@yaah.dev>"
@@ -3111,7 +3111,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -3822,13 +3822,13 @@ rec {
       };
       "gen-macros" = rec {
         crateName = "gen-macros";
-        version = "0.1.5";
+        version = "0.1.8";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/pleme-io/gen";
-          rev = "f18830b4ef710ebe44c6d92abf0e020fd6943414";
-          sha256 = "0gdf44lwk58r6cx1qdgik6qannzwarj029khfs022fz6kwlvx279";
+          rev = "97aaf2e4ce3cfbc50d0f7377d227bda42dd4d2c6";
+          sha256 = "1a91d9b524p3kmn3zxvsp0kxznnir23jdyiy9qp8945f77vyx8zy";
         };
         procMacro = true;
         libName = "gen_macros";
@@ -3854,13 +3854,13 @@ rec {
       };
       "gen-platform" = rec {
         crateName = "gen-platform";
-        version = "0.1.5";
+        version = "0.1.8";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/pleme-io/gen";
-          rev = "f18830b4ef710ebe44c6d92abf0e020fd6943414";
-          sha256 = "0gdf44lwk58r6cx1qdgik6qannzwarj029khfs022fz6kwlvx279";
+          rev = "97aaf2e4ce3cfbc50d0f7377d227bda42dd4d2c6";
+          sha256 = "1a91d9b524p3kmn3zxvsp0kxznnir23jdyiy9qp8945f77vyx8zy";
         };
         libName = "gen_platform";
         authors = [
@@ -3897,13 +3897,13 @@ rec {
       };
       "gen-types" = rec {
         crateName = "gen-types";
-        version = "0.1.5";
+        version = "0.1.8";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/pleme-io/gen";
-          rev = "f18830b4ef710ebe44c6d92abf0e020fd6943414";
-          sha256 = "0gdf44lwk58r6cx1qdgik6qannzwarj029khfs022fz6kwlvx279";
+          rev = "97aaf2e4ce3cfbc50d0f7377d227bda42dd4d2c6";
+          sha256 = "1a91d9b524p3kmn3zxvsp0kxznnir23jdyiy9qp8945f77vyx8zy";
         };
         libName = "gen_types";
         authors = [
@@ -4746,9 +4746,9 @@ rec {
       };
       "hyper" = rec {
         crateName = "hyper";
-        version = "1.9.0";
+        version = "1.10.1";
         edition = "2021";
-        sha256 = "1jmwbwqcaficskg76kq402gbymbnh2z4v99xwq3l5aa6n8bg16b2";
+        sha256 = "1624nwrh1ci34psqcl3q8q266kha8kd6fmqjj14qck49l59iqa2m";
         authors = [
           "Sean McArthur <sean@seanmonstar.com>"
         ];
@@ -4981,7 +4981,7 @@ rec {
           }
           {
             name = "rustls-native-certs";
-            packageId = "rustls-native-certs 0.8.3";
+            packageId = "rustls-native-certs 0.8.4";
             optional = true;
           }
           {
@@ -5752,19 +5752,13 @@ rec {
       };
       "inotify" = rec {
         crateName = "inotify";
-        version = "0.11.1";
+        version = "0.11.2";
         edition = "2018";
-        sha256 = "16fiffnqhfdwzgrv3wcnaih0a9xbx1a44nma1yn5idr83apkwnxx";
-        authors = [
-          "Hanno Braun <mail@hannobraun.de>"
-          "Félix Saparelli <me@passcod.name>"
-          "Cristian Kubis <cristian.kubis@tsunix.de>"
-          "Frank Denis <github@pureftpd.org>"
-        ];
+        sha256 = "1hd2xixzzr8s6anxil0db57jbfxvr4zv17qmzr34jwrfhjjnhgjk";
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
           }
           {
             name = "inotify-sys";
@@ -5777,8 +5771,8 @@ rec {
         ];
         features = {
           "default" = [ "stream" ];
-          "futures-core" = [ "dep:futures-core" ];
-          "stream" = [ "futures-core" "tokio" ];
+          "futures-util" = [ "dep:futures-util" ];
+          "stream" = [ "futures-util" "tokio" ];
           "tokio" = [ "dep:tokio" ];
         };
       };
@@ -6136,9 +6130,9 @@ rec {
       };
       "kqueue" = rec {
         crateName = "kqueue";
-        version = "1.1.1";
+        version = "1.2.0";
         edition = "2021";
-        sha256 = "0sjrsnza8zxr1zfpv6sa0zapd54kx9wlijrz9apqvs6wsw303hza";
+        sha256 = "1dc7rm23i7s1574xx185836rxyzynrsv5wkn96nf0649f990fg17";
         authors = [
           "William Orr <will@worrbase.com>"
         ];
@@ -6167,7 +6161,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
             usesDefaultFeatures = false;
           }
           {
@@ -6798,16 +6792,16 @@ rec {
       };
       "libredox" = rec {
         crateName = "libredox";
-        version = "0.1.16";
+        version = "0.1.17";
         edition = "2021";
-        sha256 = "0v54zvgknag9310wcjykgv86pgq02qr3mzgkdg4r6m1k7ns3nbz0";
+        sha256 = "1ly9hnhiy0f6ccnlg3h8lca9smvv268gj5iwia4gnm10rsxbcaph";
         authors = [
           "4lDO2 <4lDO2@protonmail.com>"
         ];
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
             optional = true;
           }
           {
@@ -6822,7 +6816,7 @@ rec {
           }
           {
             name = "redox_syscall";
-            packageId = "redox_syscall 0.7.5";
+            packageId = "redox_syscall 0.8.1";
             optional = true;
           }
         ];
@@ -6941,9 +6935,9 @@ rec {
       };
       "log" = rec {
         crateName = "log";
-        version = "0.4.30";
+        version = "0.4.31";
         edition = "2021";
-        sha256 = "1rd6sw3gv9hb93464w7x3sip99zf8sjagm662r2ckg14b1lcavk1";
+        sha256 = "0kq2fh6q2bjkrm8m6hj8kb7gxfd7cr7qbcpxd1lc1xq5rns30fqi";
         authors = [
           "The Rust Project Developers"
         ];
@@ -7054,9 +7048,9 @@ rec {
       };
       "memchr" = rec {
         crateName = "memchr";
-        version = "2.8.0";
+        version = "2.8.1";
         edition = "2021";
-        sha256 = "0y9zzxcqxvdqg6wyag7vc3h0blhdn7hkq164bxyx2vph8zs5ijpq";
+        sha256 = "1n448jx01h5z2xknj6x2dhxgr8s8fb717cf6vfqj5lmhkpj7m53b";
         authors = [
           "Andrew Gallant <jamslam@gmail.com>"
           "bluss"
@@ -7083,9 +7077,9 @@ rec {
       };
       "mio" = rec {
         crateName = "mio";
-        version = "1.2.0";
+        version = "1.2.1";
         edition = "2021";
-        sha256 = "1hanrh4fwsfkdqdaqfidz48zz1wdix23zwn3r2x78am0garfbdsh";
+        sha256 = "1nkggmrlnjs93w8rja4lvjj4aml1xqahgimv1h0p7d373kvhmg82";
         authors = [
           "Carl Lerche <me@carllerche.com>"
           "Thomas de Zeeuw <thomasdezeeuw@gmail.com>"
@@ -7211,7 +7205,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
             target = { target, features }: ("macos" == target."os" or null);
           }
           {
@@ -7299,7 +7293,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
           }
         ];
         features = {
@@ -7322,7 +7316,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -8257,7 +8251,7 @@ rec {
         dependencies = [
           {
             name = "toml_edit";
-            packageId = "toml_edit 0.25.11+spec-1.1.0";
+            packageId = "toml_edit 0.25.12+spec-1.1.0";
             usesDefaultFeatures = false;
             features = [ "parse" ];
           }
@@ -8800,7 +8794,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -9062,7 +9056,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
           }
         ];
         features = {
@@ -9072,11 +9066,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "userspace" ];
       };
-      "redox_syscall 0.7.5" = rec {
+      "redox_syscall 0.8.1" = rec {
         crateName = "redox_syscall";
-        version = "0.7.5";
+        version = "0.8.1";
         edition = "2021";
-        sha256 = "06qvcqy42dv563dsbxpxyig0mslwrhyx3xllknqyl4l41nka2rj6";
+        sha256 = "1rrcn3nxva589cdhq1bhbvnxdbb6726f1lb5srbn9qx6yaabhi2v";
         libName = "syscall";
         authors = [
           "Jeremy Soller <jackpot51@gmail.com>"
@@ -9084,7 +9078,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
           }
         ];
         features = {
@@ -9710,7 +9704,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
             usesDefaultFeatures = false;
           }
           {
@@ -9764,7 +9758,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -9914,11 +9908,11 @@ rec {
         ];
 
       };
-      "rustls-native-certs 0.8.3" = rec {
+      "rustls-native-certs 0.8.4" = rec {
         crateName = "rustls-native-certs";
-        version = "0.8.3";
+        version = "0.8.4";
         edition = "2021";
-        sha256 = "0qrajg2n90bcr3bcq6j95gjm7a9lirfkkdmjj32419dyyzan0931";
+        sha256 = "0kgazl8zc1sv63qg179bz96ilzh56lzfa5k92ji7d265f4kibdfs";
         libName = "rustls_native_certs";
         dependencies = [
           {
@@ -10241,7 +10235,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
           }
           {
             name = "core-foundation";
@@ -10288,7 +10282,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
           }
           {
             name = "core-foundation";
@@ -10768,13 +10762,13 @@ rec {
       };
       "shidou" = rec {
         crateName = "shidou";
-        version = "0.1.5";
+        version = "0.1.6";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/pleme-io/shidou";
-          rev = "93270bc88260f49bd504ccd2895df1542fc736d1";
-          sha256 = "002ckbmnls0kfcwzs3l7zglmhr409pc054rpv3xhgr8gi93nzsym";
+          rev = "63c32fe685e8866c762f17a9782863776e6c0bbf";
+          sha256 = "122wqh9hynlq7ga4dmd8iczs9w377slc6inyy97yj83i4208iw4a";
         };
         dependencies = [
           {
@@ -10819,8 +10813,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/pleme-io/shikumi";
-          rev = "d75ca144b14dbc2fd5d2dd2c763181ae41ddf4c4";
-          sha256 = "1sgm8jxmcb16ywai9mg2v3wwblpqlk0av2qakk2w9sl1hfblr92v";
+          rev = "70b2f94fbc8f5e40e409b75d91af6d840ab0a02c";
+          sha256 = "02yfiv8rlc3x00irzk3sdp4dc93wf1s8688gjxpfkxqm2jzkwn4a";
         };
         dependencies = [
           {
@@ -10901,7 +10895,7 @@ rec {
       };
       "shinka" = rec {
         crateName = "shinka";
-        version = "0.1.2";
+        version = "0.1.3";
         edition = "2021";
         crateBin = [
           {
@@ -11101,9 +11095,9 @@ rec {
       };
       "shlex" = rec {
         crateName = "shlex";
-        version = "1.3.0";
-        edition = "2015";
-        sha256 = "0r1y6bv26c1scpxvhg2cabimrmwgbp4p3wy6syj9n0c4s3q2znhg";
+        version = "2.0.1";
+        edition = "2018";
+        sha256 = "1fjsll1cd7d2bcpdij9kd6w62rpbc7qqzvydvs021vsmr1cxvypq";
         authors = [
           "comex <comexk@gmail.com>"
           "Fenhl <fenhl@fenhl.net>"
@@ -11237,11 +11231,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "all" ];
       };
-      "socket2 0.6.3" = rec {
+      "socket2 0.6.4" = rec {
         crateName = "socket2";
-        version = "0.6.3";
+        version = "0.6.4";
         edition = "2021";
-        sha256 = "0gkjjcyn69hqhhlh5kl8byk5m0d7hyrp2aqwzbs3d33q208nwxis";
+        sha256 = "0ldyp5rhba15spwxj1n94xh7sjks1398c3vwpwkxkd1087nwzlaj";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
           "Thomas de Zeeuw <thomasdezeeuw@gmail.com>"
@@ -11254,7 +11248,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" ];
           }
@@ -11824,7 +11818,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
             usesDefaultFeatures = false;
             features = [ "serde" ];
           }
@@ -12012,7 +12006,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
             usesDefaultFeatures = false;
           }
           {
@@ -12516,7 +12510,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -12764,7 +12758,7 @@ rec {
           }
           {
             name = "socket2";
-            packageId = "socket2 0.6.3";
+            packageId = "socket2 0.6.4";
             optional = true;
             target = { target, features }: ((!(builtins.elem "wasm" target."family")) || (("wasi" == target."os" or null) && (!("p1" == target."env" or null))));
             features = [ "all" ];
@@ -12789,7 +12783,7 @@ rec {
           }
           {
             name = "socket2";
-            packageId = "socket2 0.6.3";
+            packageId = "socket2 0.6.4";
             target = { target, features }: (!(builtins.elem "wasm" target."family"));
           }
           {
@@ -13238,11 +13232,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "display" "parse" "serde" ];
       };
-      "toml_edit 0.25.11+spec-1.1.0" = rec {
+      "toml_edit 0.25.12+spec-1.1.0" = rec {
         crateName = "toml_edit";
-        version = "0.25.11+spec-1.1.0";
+        version = "0.25.12+spec-1.1.0";
         edition = "2024";
-        sha256 = "0awzffbkx33v9x4h19b5mfrwp3sn4ifr16y58sbk6j6l5v9c8n8b";
+        sha256 = "1mx5paq837rjw7w51zprrjynk1vaig9yzxfqz9ac79jmd7f3w5fj";
         dependencies = [
           {
             name = "indexmap";
@@ -13742,7 +13736,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
           }
           {
             name = "bytes";
@@ -14350,13 +14344,9 @@ rec {
       };
       "typenum" = rec {
         crateName = "typenum";
-        version = "1.20.0";
+        version = "1.20.1";
         edition = "2018";
-        sha256 = "1pj35y6q11d3y55gdl6g1h2dfhmybjming0jdi9bh0bpnqm11kj0";
-        authors = [
-          "Paho Lurie-Gregg <paho@paholg.com>"
-          "Andre Bogus <bogusandre@gmail.com>"
-        ];
+        sha256 = "086s9ly0906kw5yw41249fba97w5zfxf03pyfwdkffvcprqfixdn";
         features = {
           "scale-info" = [ "dep:scale-info" ];
           "scale_info" = [ "scale-info/derive" ];
@@ -14575,9 +14565,9 @@ rec {
       };
       "uuid" = rec {
         crateName = "uuid";
-        version = "1.23.1";
+        version = "1.23.2";
         edition = "2021";
-        sha256 = "0xlwg23rmsfl3gx98qsyzpl24pf4bs9wi3mqx5c6i319hyb4mmyx";
+        sha256 = "1xy942s4z0bi8p3441wvd4ry3hx6ry1c7s6fgrr38462xqybhn6j";
         authors = [
           "Ashley Mannix<ashleymannix@live.com.au>"
           "Dylan DPC<dylan.dpc@gmail.com>"
@@ -15019,7 +15009,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
           }
           {
             name = "hashbrown";
@@ -16320,7 +16310,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_System" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -16585,7 +16575,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -16847,7 +16837,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-targets 0.48.5" = rec {
         crateName = "windows-targets";
@@ -17445,7 +17435,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.11.1";
+            packageId = "bitflags 2.12.1";
           }
           {
             name = "indexmap";
@@ -17689,9 +17679,9 @@ rec {
       };
       "zerocopy" = rec {
         crateName = "zerocopy";
-        version = "0.8.48";
+        version = "0.8.50";
         edition = "2021";
-        sha256 = "1sb8plax8jbrsng1jdval7bdhk7hhrx40dz3hwh074k6knzkgm7f";
+        sha256 = "1laahnfxs4qyfb1fdf5nbb2qfshi72b1hbi0ffp2zy2m1r7ms1iv";
         authors = [
           "Joshua Liebow-Feeser <joshlf@google.com>"
           "Jack Wrenn <jswrenn@amazon.com>"
@@ -17725,9 +17715,9 @@ rec {
       };
       "zerocopy-derive" = rec {
         crateName = "zerocopy-derive";
-        version = "0.8.48";
+        version = "0.8.50";
         edition = "2021";
-        sha256 = "1m5s0g92cxggqc74j83k1priz24k3z93sj5gadppd20p9c4cvqvh";
+        sha256 = "0fdnr9qslx1hbn2i9rsvy9s95mychfy2vj90ajsjm2basccinqqb";
         procMacro = true;
         libName = "zerocopy_derive";
         authors = [
