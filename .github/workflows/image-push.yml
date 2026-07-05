@@ -56,7 +56,12 @@ jobs:
       tag: amd64-r${{ github.run_number }}-${{ github.sha }}
       additionalTags: amd64-latest
       runner: ubuntu-24.04
-    secrets: inherit
+    secrets:
+      # image-push expects the ghcr-push PAT as GHCR_TOKEN; `secrets: inherit` only
+      # exposes it as secrets.BOT_PAT (the org PAT), so map it explicitly — else the
+      # reusable falls back to GITHUB_TOKEN, which can't write the pleme-io/shinka
+      # org package (the "initiating layer upload" 403 that failed run 28740850687).
+      GHCR_TOKEN: ${{ secrets.BOT_PAT }}
 
   image-arm64:
     name: shinka operator arm64 image → ghcr.io
@@ -67,4 +72,9 @@ jobs:
       tag: arm64-r${{ github.run_number }}-${{ github.sha }}
       additionalTags: arm64-latest
       runner: ubuntu-24.04-arm
-    secrets: inherit
+    secrets:
+      # image-push expects the ghcr-push PAT as GHCR_TOKEN; `secrets: inherit` only
+      # exposes it as secrets.BOT_PAT (the org PAT), so map it explicitly — else the
+      # reusable falls back to GITHUB_TOKEN, which can't write the pleme-io/shinka
+      # org package (the "initiating layer upload" 403 that failed run 28740850687).
+      GHCR_TOKEN: ${{ secrets.BOT_PAT }}
