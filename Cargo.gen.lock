@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "cargo_lock_sha256": "7d3db3f6ce675bc9d3d34cbe2a198666071e7ee27fe78bcc15df9a95268600bf",
+  "cargo_lock_sha256": "bc38cb42bc21bd93b612d19183a0674d91de3f1ea5c61dbffe93fdb90fce85ff",
   "target_resolves": {
     "base": {
       "Inflector-0.11.4": {
@@ -10159,7 +10159,7 @@
           "default"
         ]
       },
-      "shinka-0.1.5": {
+      "shinka-0.1.6": {
         "runtime_dependencies": [
           {
             "name": "async_graphql",
@@ -18945,7 +18945,7 @@
     "shikumi-0.1.80-b41d01e453b2c2505941ba02003f48721ca02b17": {
       "edition": "2024"
     },
-    "shinka-0.1.5": {
+    "shinka-0.1.6": {
       "edition": "2021",
       "build_script": "build.rs",
       "lib_target": {

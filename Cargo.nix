@@ -10822,7 +10822,7 @@ rec {
       };
       "shinka" = rec {
         crateName = "shinka";
-        version = "0.1.5";
+        version = "0.1.6";
         edition = "2021";
         crateBin = [
           {
