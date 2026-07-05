@@ -336,12 +336,18 @@ impl LeaderElector {
             .and_then(|s| s.lease_transitions)
             .unwrap_or(0);
 
+        // renewTime/acquireTime are k8s MicroTime fields — they MUST serialize in
+        // MicroTime's microsecond-Z format. `chrono::to_rfc3339()` emits nanosecond
+        // precision with a `+00:00` offset, which the apiserver rejects as an
+        // invalid MicroTime ("patch: Invalid value"), so the patch never applies and
+        // the lease can never be acquired/renewed. Serialize the typed MicroTime
+        // (same type create_lease uses) so the wire format is always correct.
         let patch = serde_json::json!({
             "spec": {
                 "holderIdentity": self.config.identity,
                 "leaseDurationSeconds": self.config.lease_duration.as_secs(),
-                "acquireTime": now.to_rfc3339(),
-                "renewTime": now.to_rfc3339(),
+                "acquireTime": MicroTime(now),
+                "renewTime": MicroTime(now),
                 "leaseTransitions": transitions + 1
             }
         });
@@ -372,13 +378,16 @@ impl LeaderElector {
 
     /// Renew the lease we hold
     async fn renew_lease(&self, leases: &Api<Lease>, _existing: &Lease) -> Result<bool> {
-        let now = chrono::Utc::now();
         let deadline = Instant::now() + self.config.renew_deadline;
 
         while Instant::now() < deadline {
+            // MicroTime, not to_rfc3339() — see acquire_lease: the apiserver rejects
+            // a nanosecond `+00:00` string as an invalid MicroTime, which froze
+            // renewTime and flapped leadership on every renew.
+            let now = chrono::Utc::now();
             let patch = serde_json::json!({
                 "spec": {
-                    "renewTime": now.to_rfc3339()
+                    "renewTime": MicroTime(now)
                 }
             });
 
