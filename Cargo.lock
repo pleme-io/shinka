@@ -3305,7 +3305,7 @@ dependencies = [
 
 [[package]]
 name = "shinka"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-graphql",
  "async-graphql-axum",
