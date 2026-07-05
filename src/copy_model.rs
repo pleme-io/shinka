@@ -77,7 +77,14 @@ use crate::extract::{render_base_configmap, render_base_ops, render_database_ddl
 /// `DropColumn`, `RenameColumn`, `Truncate` do not exist), so a destructive
 /// evolution is *unrepresentable* — the compiler refuses it. Every arm renders
 /// additive DDL or carries operator-owned additive SQL.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// The safe-by-construction property extends to the **wire boundary**: the enum
+/// is internally tagged on `op`, so a mold file naming `op: dropTable` /
+/// `op: renameColumn` fails to deserialize (serde "unknown variant") — a
+/// destructive evolution has no *representation* in an authored mold, not merely
+/// no runtime path (UNREPRESENTABILITY: parse-time-rejected).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "camelCase")]
 pub enum EvolutionOp {
     /// Grow the model with a whole new database (create-database + every table),
     /// rendered additively (`CREATE DATABASE/TABLE IF NOT EXISTS`) — idempotent
@@ -164,6 +171,54 @@ pub fn render_mold(plan: &MoldPlan) -> Vec<SqlOp> {
 /// `status.lastMigration.imageTag`, exactly like a `directRef` base).
 pub fn mold_version(plan: &MoldPlan) -> String {
     content_version(&render_mold(plan))
+}
+
+/// A typed mold file — the additive evolutions to compose onto an absorbed base.
+///
+/// This is the authored *input* to the MOLD leg: an operator writes a YAML mold
+/// file, `/copy-model` parses it into this type at the CLI boundary, and
+/// [`MoldSpec::into_plan`] folds it onto the extracted base. Because
+/// [`EvolutionOp`] carries **no destructive variant**, a mold file *cannot*
+/// express a destructive evolution — the safe-by-construction property holds at
+/// the parse boundary, not just in-Rust.
+///
+/// ```yaml
+/// evolutions:
+///   - op: createDatabase
+///     name: cachedb
+///     tables:
+///       - name: entries
+///         columns: [{ name: k, dataType: "varchar(64)", nullable: false }]
+///         primaryKey: [k]
+///   - op: rawAdditive
+///     key: seed-roles
+///     sql: "INSERT INTO `authdb`.`roles` (name) VALUES ('admin');"
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoldSpec {
+    /// The additive evolutions, composed after the base in file order.
+    #[serde(default)]
+    pub evolutions: Vec<EvolutionOp>,
+}
+
+impl MoldSpec {
+    /// Parse a YAML mold file into a typed [`MoldSpec`]. A malformed evolution or
+    /// an unknown (e.g. destructive) variant is rejected here — the parse
+    /// boundary, never a silent downstream surprise.
+    pub fn from_yaml(yaml: &str) -> Result<Self, serde_yaml::Error> {
+        serde_yaml::from_str(yaml)
+    }
+
+    /// Compose this mold's evolutions onto an absorbed `base` for `engine`,
+    /// producing a [`MoldPlan`] [`render_mold`] turns into one ordered op set.
+    pub fn into_plan(self, engine: DatabaseEngine, base: Vec<SqlOp>) -> MoldPlan {
+        MoldPlan {
+            engine,
+            base,
+            evolutions: self.evolutions,
+        }
+    }
 }
 
 // =============================================================================
@@ -411,6 +466,126 @@ mod tests {
         assert_ne!(mold_version(&bare), v1, "molding changes the version");
     }
 
+    // ---- Mold-file (MoldSpec) parse-boundary tests -----------------------
+
+    #[test]
+    fn mold_spec_parses_additive_evolutions_from_yaml() {
+        let yaml = r#"
+evolutions:
+  - op: createDatabase
+    name: cachedb
+    tables:
+      - name: entries
+        columns:
+          - name: k
+            dataType: "varchar(64)"
+            nullable: false
+        primaryKey: [k]
+  - op: rawAdditive
+    key: seed-roles
+    sql: "INSERT INTO `authdb`.`roles` (name) VALUES ('admin');"
+"#;
+        let spec = MoldSpec::from_yaml(yaml).expect("a valid mold file parses");
+        assert_eq!(spec.evolutions.len(), 2);
+        match &spec.evolutions[0] {
+            EvolutionOp::CreateDatabase(dbm) => {
+                assert_eq!(dbm.name, "cachedb");
+                assert_eq!(dbm.tables[0].name, "entries");
+                assert_eq!(dbm.tables[0].primary_key, vec!["k".to_string()]);
+                assert_eq!(dbm.tables[0].columns[0].data_type, "varchar(64)");
+                assert!(!dbm.tables[0].columns[0].nullable);
+            }
+            other => panic!("expected createDatabase first, got {other:?}"),
+        }
+        match &spec.evolutions[1] {
+            EvolutionOp::RawAdditive { key, .. } => assert_eq!(key, "seed-roles"),
+            other => panic!("expected rawAdditive second, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mold_spec_column_defaults_are_ergonomic_when_omitted() {
+        // An author who omits `nullable` gets SQL-standard nullable; omitting
+        // autoIncrement / default is fine — the mold file stays terse.
+        let yaml = r#"
+evolutions:
+  - op: createDatabase
+    name: d
+    tables:
+      - name: t
+        columns:
+          - name: c
+            dataType: text
+"#;
+        let spec = MoldSpec::from_yaml(yaml).unwrap();
+        let EvolutionOp::CreateDatabase(dbm) = &spec.evolutions[0] else {
+            panic!("createDatabase");
+        };
+        let col = &dbm.tables[0].columns[0];
+        assert!(col.nullable, "omitted nullable defaults to SQL-standard true");
+        assert!(!col.auto_increment);
+        assert!(col.default.is_none());
+    }
+
+    #[test]
+    fn mold_spec_rejects_a_destructive_evolution_at_the_parse_boundary() {
+        // A destructive op has NO variant, so a mold file cannot name one: serde
+        // rejects the unknown variant. Safe-by-construction at the wire boundary,
+        // not merely a runtime guard.
+        let yaml = r#"
+evolutions:
+  - op: dropTable
+    name: authdb
+"#;
+        let err = MoldSpec::from_yaml(yaml).expect_err("destructive op is unrepresentable");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown variant") || msg.contains("dropTable"),
+            "rejected as an unknown variant, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn mold_spec_into_plan_composes_evolutions_over_the_base() {
+        // The end-to-end MOLD path the CLI overlay drives: parse a mold file,
+        // fold it onto the extracted base, render one ordered op set.
+        let base = base_authdb();
+        let yaml = r#"
+evolutions:
+  - op: rawAdditive
+    key: seed
+    sql: "INSERT INTO t VALUES (1);"
+"#;
+        let spec = MoldSpec::from_yaml(yaml).unwrap();
+        let plan = spec.into_plan(DatabaseEngine::Mysql, base);
+        let ops = render_mold(&plan);
+        assert_eq!(ops.len(), 2, "base op + one evolution");
+        assert_eq!(ops[0].name, "00-authdb.sql");
+        assert_eq!(ops[1].name, "evo-00-seed.sql");
+        assert!(ops[1].sql.contains("INSERT INTO t VALUES (1);"));
+    }
+
+    #[test]
+    fn mold_spec_round_trips_through_yaml() {
+        // Persist-the-spec discipline: a MoldSpec serialises and re-parses to an
+        // equal value (so a committed mold file is auditable + re-renderable).
+        let spec = MoldSpec {
+            evolutions: vec![
+                EvolutionOp::CreateDatabase(db(
+                    "cachedb",
+                    vec![table("entries", &[("k", "varchar(64)", true)])],
+                )),
+                EvolutionOp::RawAdditive {
+                    key: "seed".to_string(),
+                    sql: "INSERT INTO t VALUES (1);".to_string(),
+                },
+            ],
+        };
+        let yaml = serde_yaml::to_string(&spec).expect("serialises");
+        let back = MoldSpec::from_yaml(&yaml).expect("re-parses");
+        assert_eq!(back, spec, "mold spec round-trips through YAML");
+    }
+
     // ---- Camelot projection tests ----------------------------------------
 
     #[test]
@@ -489,7 +664,6 @@ mod tests {
 
     #[test]
     fn bundle_migration_serialises_to_a_valid_directref_yaml() {
-        let ops = base_authdb();
         let target = AbsorbTarget {
             migration_name: "copy-model-authdb".to_string(),
             namespace: "camelot".to_string(),

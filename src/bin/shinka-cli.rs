@@ -90,6 +90,9 @@ enum Command {
         databases: Vec<String>,
         /// Project in the camelot per-service-DB dependency order.
         camelot: bool,
+        /// Optional typed mold file (YAML) of additive evolutions to compose
+        /// onto the extracted base (the MOLD leg).
+        mold_file: Option<String>,
         /// Target (absorb-into) connection the emitted CR addresses.
         target_host: String,
         credentials_secret: String,
@@ -237,6 +240,7 @@ fn parse_args() -> Result<Command, String> {
                 .map(|v| v.split(',').map(|s| s.trim().to_string()).collect())
                 .unwrap_or_default();
             let camelot = args.iter().any(|a| a == "--camelot");
+            let mold_file = find_flag(&args, &["--mold", "--mold-file"]);
             let target_host = find_flag(&args, &["--target-host"]).ok_or_else(|| {
                 format!("copy-model: --target-host <HOST> is required (the CR applies here)\n{}", usage())
             })?;
@@ -258,6 +262,7 @@ fn parse_args() -> Result<Command, String> {
                 source_username,
                 databases,
                 camelot,
+                mold_file,
                 target_host,
                 credentials_secret,
                 password_key,
@@ -331,6 +336,8 @@ COPY-MODEL OPTIONS (/copy-model — extract SOURCE + emit absorb-as-base bundle)
     --engine <mysql|postgres>     Source engine (default: mysql)
     -d, --databases <a,b,c>       Databases to include (default: all user DBs)
     --camelot                     Project in the camelot service-dependency order
+    --mold <FILE>                 Typed YAML mold file of additive evolutions to
+                                  compose onto the extracted base (the MOLD leg)
     --target-host <HOST>          Target host the emitted directRef CR applies into (required)
     --credentials-secret <NAME>   Target admin-credentials Secret (required)
     --password-key <KEY>          Key in that Secret holding the password (default: password)
@@ -341,6 +348,13 @@ COPY-MODEL OPTIONS (/copy-model — extract SOURCE + emit absorb-as-base bundle)
 
     SHINKA_SOURCE_PASSWORD=... shinka-cli copy-model --host mte-mysql \
         -d authdb,uamdb --camelot --target-host akeyless-saas-akeyless-mysql \
+        --credentials-secret akeyless-mysql-root -c akeyless-schema-apply-sql \
+        --name copy-model-camelot -n camelot > absorb-bundle.yaml
+
+    # same, but MOLD the base forward with additive evolutions from a typed file:
+    SHINKA_SOURCE_PASSWORD=... shinka-cli copy-model --host mte-mysql \
+        -d authdb,uamdb --camelot --mold camelot-evolutions.yaml \
+        --target-host akeyless-saas-akeyless-mysql \
         --credentials-secret akeyless-mysql-root -c akeyless-schema-apply-sql \
         --name copy-model-camelot -n camelot > absorb-bundle.yaml
 "#
@@ -395,6 +409,7 @@ async fn main() {
         source_username,
         databases,
         camelot,
+        mold_file,
         target_host,
         credentials_secret,
         password_key,
@@ -410,6 +425,7 @@ async fn main() {
             source_username.as_deref(),
             databases,
             *camelot,
+            mold_file.as_deref(),
             target_host,
             credentials_secret,
             password_key,
@@ -531,6 +547,7 @@ async fn run_copy_model(
     source_username: Option<&str>,
     databases: &[String],
     camelot: bool,
+    mold_file: Option<&str>,
     target_host: &str,
     credentials_secret: &str,
     password_key: &str,
@@ -538,7 +555,7 @@ async fn run_copy_model(
     configmap_name: &str,
     namespace: &str,
 ) -> Result<(), String> {
-    use shinka::copy_model::{project_camelot, render_bundle, AbsorbTarget};
+    use shinka::copy_model::{project_camelot, render_bundle, render_mold, AbsorbTarget, MoldSpec};
     use shinka::direct::DirectConnParams;
     use shinka::extract::{extract_base, DatabaseFilter, SqlxSchemaSource};
 
@@ -567,10 +584,26 @@ async fn run_copy_model(
         .map_err(|e| e.to_string())?;
 
     // Project in camelot dependency order when asked; otherwise keep extract order.
-    let ops = if camelot {
+    let base = if camelot {
         project_camelot(&model)
     } else {
         base_ops
+    };
+
+    // MOLD leg: compose additive evolutions from a typed mold file onto the base.
+    // The mold file is an operator-authored input (like a values file); it is
+    // parsed at a typed boundary, so a destructive evolution cannot be expressed.
+    let ops = match mold_file {
+        Some(path) => {
+            let yaml = std::fs::read_to_string(path)
+                .map_err(|e| format!("copy-model: reading mold file {path}: {e}"))?;
+            let spec = MoldSpec::from_yaml(&yaml)
+                .map_err(|e| format!("copy-model: parsing mold file {path}: {e}"))?;
+            let n = spec.evolutions.len();
+            eprintln!("# copy-model: molding {n} additive evolution(s) onto the base");
+            render_mold(&spec.into_plan(engine, base))
+        }
+        None => base,
     };
 
     eprintln!(

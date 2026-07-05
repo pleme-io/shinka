@@ -72,11 +72,13 @@ use crate::direct::{DirectConnParams, SqlOp};
 /// Deterministically ordered (databases by name, tables by name, columns by
 /// source ordinal) so a re-extract of an unchanged source produces byte-identical
 /// output — the property `render_base_ops` relies on for drift detection.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SchemaModel {
     /// The wire protocol the model was extracted from (selects DDL dialect).
     pub engine: DatabaseEngine,
     /// The databases (MySQL schemas / Postgres databases-or-schemas) captured.
+    #[serde(default)]
     pub databases: Vec<DatabaseModel>,
 }
 
@@ -97,18 +99,26 @@ impl SchemaModel {
 }
 
 /// One database (MySQL schema) and its tables, ordered by table name.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Also the authoring shape of a `/copy-model` `createDatabase` mold evolution
+/// (the mold file reuses this type via serde — one model, no fork).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DatabaseModel {
     pub name: String,
+    #[serde(default)]
     pub tables: Vec<TableModel>,
 }
 
 /// One table and its columns, ordered by source ordinal position.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TableModel {
     pub name: String,
+    #[serde(default)]
     pub columns: Vec<ColumnModel>,
     /// Ordered primary-key column names (empty when the table has no PK).
+    #[serde(default)]
     pub primary_key: Vec<String>,
 }
 
@@ -118,15 +128,27 @@ pub struct TableModel {
 /// `column_type`, e.g. `varchar(255)` / `int unsigned`; Postgres `data_type`
 /// with length folded in) so the rendered DDL round-trips the source type
 /// without a lossy type-name mapping.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ColumnModel {
     pub name: String,
     pub data_type: String,
+    /// Whether the column admits NULL. Defaults to SQL-standard nullable when a
+    /// mold author omits it.
+    #[serde(default = "nullable_default")]
     pub nullable: bool,
     /// Column default expression as reported by the engine, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
     /// True for `AUTO_INCREMENT` (MySQL) / identity (Postgres) columns.
+    #[serde(default)]
     pub auto_increment: bool,
+}
+
+/// serde default for [`ColumnModel::nullable`] — SQL-standard columns are
+/// nullable unless declared `NOT NULL`.
+fn nullable_default() -> bool {
+    true
 }
 
 // =============================================================================
