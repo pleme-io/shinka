@@ -333,8 +333,8 @@ async fn show_status(
         .unwrap_or_else(|| "Unknown".to_string());
     println!("Phase:     {}", colorize_phase(&phase));
 
-    // Database
-    println!("Database:  {}", spec.database.cnpg_cluster_ref.name);
+    // Database (CNPG cluster name, or engine://host for a direct source)
+    println!("Database:  {}", spec.database.display_target());
 
     // Deployment (first migrator)
     let deployment_name = migration

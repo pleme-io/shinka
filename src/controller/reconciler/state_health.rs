@@ -17,7 +17,9 @@ pub(super) async fn handle_checking_health(
 ) -> ReconcileResult {
     let name = migration.name_or_default();
     let namespace = migration.namespace_or_default();
-    let cluster_name = &migration.spec.database.cnpg_cluster_ref.name;
+    // LiveTODO(direct-source-reconcile): CNPG-only path — a direct (non-CNPG)
+    // source fails typed here rather than being mis-health-checked.
+    let cluster_name = &migration.spec.database.require_cnpg_ref()?.name;
 
     metrics::set_migration_phase(&name, &namespace, "CheckingHealth");
 
@@ -91,7 +93,8 @@ pub(super) async fn handle_waiting_for_database(
 ) -> ReconcileResult {
     let name = migration.name_or_default();
     let namespace = migration.namespace_or_default();
-    let cluster_name = &migration.spec.database.cnpg_cluster_ref.name;
+    // LiveTODO(direct-source-reconcile): CNPG-only path.
+    let cluster_name = &migration.spec.database.require_cnpg_ref()?.name;
 
     metrics::set_migration_phase(&name, &namespace, "WaitingForDatabase");
 

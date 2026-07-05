@@ -125,16 +125,98 @@ pub struct DatabaseMigrationSpec {
     pub timeouts: TimeoutSpec,
 }
 
-/// Database configuration referencing a CNPG cluster
+/// Database configuration for a migration.
+///
+/// A migration targets exactly ONE database source. Two source shapes are
+/// supported (validated by [`DatabaseSpec::source`] — exactly one MUST be set):
+///
+/// - `cnpgClusterRef` — a CloudNativePG (Postgres) cluster managed in-cluster.
+///   The controller resolves the connection from the cluster's secrets and
+///   gates on CNPG health. This is the original, fully-reconciled source.
+///
+/// - `directRef` — a direct connection to an already-running engine (MySQL or
+///   Postgres) addressed by host + credentials secret, applying additive DDL
+///   from a mounted SQL ConfigMap. Added for non-CNPG stores (e.g. an Akeyless
+///   SaaS MySQL tier).
+///
+/// ## Tier honesty — `directRef` is a typed border, not yet a live reconcile
+///
+/// The CRD types, exactly-one validation, and job-buildability for `directRef`
+/// land here and are unit-tested. The controller *reconcile branch* for a
+/// direct source — health-skip (no CNPG cluster to poll), engine-specific
+/// checksum, and DATABASE_URL synthesis from `credentialsSecretRef` — is NOT
+/// yet wired. A `directRef` migration is therefore *representable and emittable*
+/// but does not yet reconcile live; the CNPG-only reconcile states return a
+/// typed [`DatabaseSourceError`] rather than silently mis-handling it. See the
+/// `LiveTODO(direct-source-reconcile)` markers in the controller.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DatabaseSpec {
-    /// Reference to the CNPG cluster
-    #[serde(rename = "cnpgClusterRef")]
-    pub cnpg_cluster_ref: CnpgClusterRef,
+    /// Reference to a CloudNativePG (Postgres) cluster. Mutually exclusive with
+    /// `directRef`; exactly one MUST be set.
+    #[serde(
+        default,
+        rename = "cnpgClusterRef",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cnpg_cluster_ref: Option<CnpgClusterRef>,
+
+    /// Reference to a direct (non-CNPG) database connection. Mutually exclusive
+    /// with `cnpgClusterRef`; exactly one MUST be set.
+    #[serde(default, rename = "directRef", skip_serializing_if = "Option::is_none")]
+    pub direct_ref: Option<DirectDatabaseRef>,
+}
+
+impl DatabaseSpec {
+    /// Resolve the single validated database source, enforcing exactly-one.
+    ///
+    /// Returns [`DatabaseSourceError::NoSource`] when neither reference is set
+    /// and [`DatabaseSourceError::BothSources`] when both are (they are
+    /// mutually exclusive by construction).
+    pub fn source(&self) -> Result<DatabaseSource<'_>, DatabaseSourceError> {
+        match (&self.cnpg_cluster_ref, &self.direct_ref) {
+            (Some(_), Some(_)) => Err(DatabaseSourceError::BothSources),
+            (None, None) => Err(DatabaseSourceError::NoSource),
+            (Some(c), None) => Ok(DatabaseSource::Cnpg(c)),
+            (None, Some(d)) => Ok(DatabaseSource::Direct(d)),
+        }
+    }
+
+    /// Require a CNPG cluster reference (for the CNPG-only reconcile paths).
+    ///
+    /// A direct-source migration yields [`DatabaseSourceError::NotCnpg`] so the
+    /// CNPG-only controller states fail typed rather than mis-handling it — this
+    /// is the `LiveTODO(direct-source-reconcile)` boundary.
+    pub fn require_cnpg_ref(&self) -> Result<&CnpgClusterRef, DatabaseSourceError> {
+        match self.source()? {
+            DatabaseSource::Cnpg(c) => Ok(c),
+            DatabaseSource::Direct(_) => Err(DatabaseSourceError::NotCnpg),
+        }
+    }
+
+    /// A human-readable target label for logs / events / API summaries.
+    ///
+    /// Never fails — falls back to a sentinel for an unresolvable spec so the
+    /// display paths (events, CLI, API view) always have a value.
+    pub fn display_target(&self) -> String {
+        match self.source() {
+            Ok(DatabaseSource::Cnpg(c)) => c.name.clone(),
+            Ok(DatabaseSource::Direct(d)) => format!("{}://{}", d.engine, d.host),
+            Err(_) => "<unset>".to_string(),
+        }
+    }
+
+    /// The database / schema name for logs / events / API summaries, if any.
+    pub fn display_database(&self) -> Option<String> {
+        match self.source() {
+            Ok(DatabaseSource::Cnpg(c)) => c.database.clone(),
+            Ok(DatabaseSource::Direct(d)) => d.database.clone(),
+            Err(_) => None,
+        }
+    }
 }
 
 /// Reference to a CNPG Cluster resource
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct CnpgClusterRef {
     /// Name of the CNPG Cluster
     pub name: String,
@@ -143,6 +225,146 @@ pub struct CnpgClusterRef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub database: Option<String>,
 }
+
+/// Database engine wire protocol for a direct (non-CNPG) source.
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseEngine {
+    /// MySQL / MariaDB wire protocol.
+    #[default]
+    Mysql,
+    /// PostgreSQL wire protocol (direct, not CNPG-managed).
+    Postgres,
+}
+
+impl std::fmt::Display for DatabaseEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DatabaseEngine::Mysql => write!(f, "mysql"),
+            DatabaseEngine::Postgres => write!(f, "postgres"),
+        }
+    }
+}
+
+impl DatabaseEngine {
+    /// The engine's standard TCP port.
+    pub fn default_port(&self) -> u16 {
+        match self {
+            DatabaseEngine::Mysql => 3306,
+            DatabaseEngine::Postgres => 5432,
+        }
+    }
+
+    /// The engine's conventional admin username.
+    pub fn default_admin_user(&self) -> &'static str {
+        match self {
+            DatabaseEngine::Mysql => "root",
+            DatabaseEngine::Postgres => "postgres",
+        }
+    }
+}
+
+/// Reference to a direct (non-CNPG) database connection.
+///
+/// Addresses an already-running engine by host + credentials secret. DDL is
+/// applied additively from a mounted SQL ConfigMap (never destructive).
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DirectDatabaseRef {
+    /// Engine wire protocol (defaults to mysql).
+    #[serde(default)]
+    pub engine: DatabaseEngine,
+
+    /// Service hostname of the database (e.g. `akeyless-saas-akeyless-mysql`).
+    pub host: String,
+
+    /// Port (defaults to the engine's standard port when omitted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+
+    /// Database / schema name to apply DDL against. Optional for multi-database
+    /// DDL scripts that select their own database (e.g. `USE authdb;`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
+
+    /// Admin username (defaults to the engine convention: `root` for mysql,
+    /// `postgres` for postgres).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+
+    /// Secret holding the admin credentials the migration job authenticates with.
+    #[serde(rename = "credentialsSecretRef")]
+    pub credentials_secret_ref: SecretRef,
+
+    /// Key within `credentialsSecretRef` holding the password.
+    #[serde(default = "default_password_key", rename = "passwordKey")]
+    pub password_key: String,
+
+    /// ConfigMap providing the SQL DDL files applied by the migration job.
+    #[serde(rename = "sqlConfigMapRef")]
+    pub sql_config_map_ref: ConfigMapRef,
+}
+
+fn default_password_key() -> String {
+    "password".to_string()
+}
+
+impl DirectDatabaseRef {
+    /// Effective port (explicit, else the engine's standard port).
+    pub fn effective_port(&self) -> u16 {
+        self.port.unwrap_or_else(|| self.engine.default_port())
+    }
+
+    /// Effective admin username (explicit, else the engine convention).
+    pub fn effective_username(&self) -> &str {
+        match &self.username {
+            Some(u) => u.as_str(),
+            None => self.engine.default_admin_user(),
+        }
+    }
+}
+
+/// The resolved, validated database source of a migration.
+#[derive(Clone, Copy, Debug)]
+pub enum DatabaseSource<'a> {
+    /// A CloudNativePG-managed Postgres cluster.
+    Cnpg(&'a CnpgClusterRef),
+    /// A direct (non-CNPG) engine connection.
+    Direct(&'a DirectDatabaseRef),
+}
+
+/// Error resolving a [`DatabaseSpec`] to exactly one source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DatabaseSourceError {
+    /// Neither `cnpgClusterRef` nor `directRef` was set.
+    NoSource,
+    /// Both `cnpgClusterRef` and `directRef` were set (mutually exclusive).
+    BothSources,
+    /// A CNPG source was required but the migration targets a direct source.
+    NotCnpg,
+}
+
+impl std::fmt::Display for DatabaseSourceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DatabaseSourceError::NoSource => write!(
+                f,
+                "database source: exactly one of cnpgClusterRef or directRef must be set (found neither)"
+            ),
+            DatabaseSourceError::BothSources => write!(
+                f,
+                "database source: cnpgClusterRef and directRef are mutually exclusive (found both)"
+            ),
+            DatabaseSourceError::NotCnpg => write!(
+                f,
+                "database source: a CNPG cluster reference was required but this migration targets a direct (non-CNPG) source — LiveTODO(direct-source-reconcile)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DatabaseSourceError {}
 
 /// Migrator configuration - which deployment and tool to use for migrations
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -801,10 +1023,11 @@ mod tests {
             },
             spec: DatabaseMigrationSpec {
                 database: DatabaseSpec {
-                    cnpg_cluster_ref: CnpgClusterRef {
+                    cnpg_cluster_ref: Some(CnpgClusterRef {
                         name: "my-cluster".to_string(),
                         database: Some("mydb".to_string()),
-                    },
+                    }),
+                    direct_ref: None,
                 },
                 migrator: Some(MigratorSpec {
                     name: None,
@@ -1300,6 +1523,143 @@ mod tests {
     fn test_migration_phase_equality() {
         assert_eq!(MigrationPhase::Pending, MigrationPhase::Pending);
         assert_ne!(MigrationPhase::Pending, MigrationPhase::Ready);
+    }
+
+    // =========================================================================
+    // Direct (non-CNPG) database-source tests
+    // =========================================================================
+
+    fn direct_ref() -> DirectDatabaseRef {
+        DirectDatabaseRef {
+            engine: DatabaseEngine::Mysql,
+            host: "akeyless-saas-akeyless-mysql".to_string(),
+            port: None,
+            database: Some("authdb".to_string()),
+            username: None,
+            credentials_secret_ref: SecretRef {
+                name: "akeyless-mysql-root".to_string(),
+            },
+            password_key: "root-password".to_string(),
+            sql_config_map_ref: ConfigMapRef {
+                name: "akeyless-schema-apply-sql".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn test_database_source_cnpg_only() {
+        let spec = DatabaseSpec {
+            cnpg_cluster_ref: Some(CnpgClusterRef {
+                name: "pg".to_string(),
+                database: Some("app".to_string()),
+            }),
+            direct_ref: None,
+        };
+        match spec.source().expect("cnpg source resolves") {
+            DatabaseSource::Cnpg(c) => assert_eq!(c.name, "pg"),
+            DatabaseSource::Direct(_) => panic!("expected cnpg"),
+        }
+        assert_eq!(spec.require_cnpg_ref().unwrap().name, "pg");
+        assert_eq!(spec.display_target(), "pg");
+        assert_eq!(spec.display_database(), Some("app".to_string()));
+    }
+
+    #[test]
+    fn test_database_source_direct_only() {
+        let spec = DatabaseSpec {
+            cnpg_cluster_ref: None,
+            direct_ref: Some(direct_ref()),
+        };
+        match spec.source().expect("direct source resolves") {
+            DatabaseSource::Direct(d) => assert_eq!(d.host, "akeyless-saas-akeyless-mysql"),
+            DatabaseSource::Cnpg(_) => panic!("expected direct"),
+        }
+        // require_cnpg_ref is the LiveTODO boundary: a direct source is typed
+        // but the CNPG-only reconcile path must fail typed, not mis-handle it.
+        assert_eq!(spec.require_cnpg_ref(), Err(DatabaseSourceError::NotCnpg));
+        assert_eq!(spec.display_target(), "mysql://akeyless-saas-akeyless-mysql");
+        assert_eq!(spec.display_database(), Some("authdb".to_string()));
+    }
+
+    #[test]
+    fn test_database_source_none_is_typed_error() {
+        let spec = DatabaseSpec {
+            cnpg_cluster_ref: None,
+            direct_ref: None,
+        };
+        assert!(matches!(spec.source(), Err(DatabaseSourceError::NoSource)));
+        assert_eq!(spec.display_target(), "<unset>");
+        assert_eq!(spec.display_database(), None);
+    }
+
+    #[test]
+    fn test_database_source_both_is_typed_error() {
+        let spec = DatabaseSpec {
+            cnpg_cluster_ref: Some(CnpgClusterRef {
+                name: "pg".to_string(),
+                database: None,
+            }),
+            direct_ref: Some(direct_ref()),
+        };
+        assert!(matches!(
+            spec.source(),
+            Err(DatabaseSourceError::BothSources)
+        ));
+        assert_eq!(spec.require_cnpg_ref(), Err(DatabaseSourceError::BothSources));
+    }
+
+    #[test]
+    fn test_direct_ref_effective_port_and_user_defaults() {
+        let mut d = direct_ref();
+        assert_eq!(d.effective_port(), 3306);
+        assert_eq!(d.effective_username(), "root");
+        d.engine = DatabaseEngine::Postgres;
+        assert_eq!(d.effective_port(), 5432);
+        assert_eq!(d.effective_username(), "postgres");
+        d.port = Some(13306);
+        d.username = Some("admin".to_string());
+        assert_eq!(d.effective_port(), 13306);
+        assert_eq!(d.effective_username(), "admin");
+    }
+
+    #[test]
+    fn test_database_engine_display_and_serde() {
+        assert_eq!(DatabaseEngine::Mysql.to_string(), "mysql");
+        assert_eq!(DatabaseEngine::Postgres.to_string(), "postgres");
+        assert_eq!(
+            serde_json::to_string(&DatabaseEngine::Mysql).unwrap(),
+            "\"mysql\""
+        );
+        let e: DatabaseEngine = serde_json::from_str("\"postgres\"").unwrap();
+        assert_eq!(e, DatabaseEngine::Postgres);
+        assert_eq!(DatabaseEngine::default(), DatabaseEngine::Mysql);
+    }
+
+    #[test]
+    fn test_database_spec_cnpg_wire_backcompat() {
+        // A pre-extension CNPG spec (only cnpgClusterRef present) still
+        // deserializes and re-serializes without a directRef key.
+        let json = r#"{"cnpgClusterRef":{"name":"pg","database":"app"}}"#;
+        let spec: DatabaseSpec = serde_json::from_str(json).unwrap();
+        assert!(spec.cnpg_cluster_ref.is_some());
+        assert!(spec.direct_ref.is_none());
+        let round = serde_json::to_string(&spec).unwrap();
+        assert!(!round.contains("directRef"));
+        assert!(round.contains("cnpgClusterRef"));
+    }
+
+    #[test]
+    fn test_database_spec_direct_wire_roundtrip() {
+        let spec = DatabaseSpec {
+            cnpg_cluster_ref: None,
+            direct_ref: Some(direct_ref()),
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(json.contains("directRef"));
+        assert!(!json.contains("cnpgClusterRef"));
+        let back: DatabaseSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.direct_ref.as_ref().unwrap().engine, DatabaseEngine::Mysql);
+        assert_eq!(back.direct_ref.as_ref().unwrap().password_key, "root-password");
     }
 }
 

@@ -564,8 +564,9 @@ impl From<&DatabaseMigration> for MigrationResource {
                 // Get the first migrator for summary (or use defaults)
                 let first_migrator = dm.get_migrators().first().copied();
                 MigrationSpecSummary {
-                    cnpg_cluster: spec.database.cnpg_cluster_ref.name.clone(),
-                    database: spec.database.cnpg_cluster_ref.database.clone(),
+                    // display_target/display_database cover CNPG + direct sources.
+                    cnpg_cluster: spec.database.display_target(),
+                    database: spec.database.display_database(),
                     migrator_type: first_migrator
                         .map(|m| m.migrator_type.to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
@@ -664,10 +665,11 @@ mod tests {
             },
             spec: DatabaseMigrationSpec {
                 database: DatabaseSpec {
-                    cnpg_cluster_ref: CnpgClusterRef {
+                    cnpg_cluster_ref: Some(CnpgClusterRef {
                         name: "my-cluster".to_string(),
                         database: Some("mydb".to_string()),
-                    },
+                    }),
+                    direct_ref: None,
                 },
                 migrator: Some(MigratorSpec {
                     name: None,

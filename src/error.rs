@@ -115,6 +115,15 @@ pub enum Error {
     Finalizer(String),
 }
 
+impl From<crate::crd::DatabaseSourceError> for Error {
+    /// A misconfigured or direct-source migration reaching a CNPG-only path is a
+    /// permanent configuration error (the spec cannot be reconciled by this
+    /// state) — never a transient retry.
+    fn from(e: crate::crd::DatabaseSourceError) -> Self {
+        Error::Configuration(e.to_string())
+    }
+}
+
 impl Error {
     /// Check if the error is transient and should be retried
     pub fn is_transient(&self) -> bool {

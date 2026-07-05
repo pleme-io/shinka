@@ -37,8 +37,14 @@ spec:
               properties:
                 database:
                   type: object
-                  required:
-                    - cnpgClusterRef
+                  description: |
+                    Database source. Exactly ONE of `cnpgClusterRef` (a
+                    CloudNativePG-managed Postgres cluster) or `directRef` (a
+                    direct MySQL/Postgres connection) must be set. `directRef`
+                    is a typed border: the controller reconcile branch for a
+                    direct source is not yet wired (LiveTODO), so a directRef
+                    migration is representable + emittable but does not yet
+                    reconcile live.
                   properties:
                     cnpgClusterRef:
                       type: object
@@ -51,6 +57,53 @@ spec:
                         database:
                           type: string
                           description: Database name within the cluster
+                    directRef:
+                      type: object
+                      description: Direct (non-CNPG) database connection.
+                      required:
+                        - host
+                        - credentialsSecretRef
+                        - sqlConfigMapRef
+                      properties:
+                        engine:
+                          type: string
+                          enum:
+                            - mysql
+                            - postgres
+                          default: mysql
+                          description: Engine wire protocol (defaults to mysql).
+                        host:
+                          type: string
+                          description: Service hostname of the database.
+                        port:
+                          type: integer
+                          description: Port (defaults to the engine standard port).
+                        database:
+                          type: string
+                          description: Database/schema name to apply DDL against.
+                        username:
+                          type: string
+                          description: Admin username (defaults to engine convention).
+                        credentialsSecretRef:
+                          type: object
+                          required:
+                            - name
+                          properties:
+                            name:
+                              type: string
+                              description: Secret holding admin credentials.
+                        passwordKey:
+                          type: string
+                          default: password
+                          description: Key within credentialsSecretRef holding the password.
+                        sqlConfigMapRef:
+                          type: object
+                          required:
+                            - name
+                          properties:
+                            name:
+                              type: string
+                              description: ConfigMap providing the SQL DDL files.
                 migrator:
                   type: object
                   description: Single migrator configuration (for backward compatibility)

@@ -277,7 +277,8 @@ pub(super) async fn handle_failed(
 
     if cooldown_elapsed {
         // Check database health before retrying
-        let cluster_name = &migration.spec.database.cnpg_cluster_ref.name;
+        // LiveTODO(direct-source-reconcile): CNPG-only path.
+        let cluster_name = &migration.spec.database.require_cnpg_ref()?.name;
         let health =
             database::check_cluster_health(ctx.client.clone(), &namespace, cluster_name).await;
 

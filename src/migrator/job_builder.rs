@@ -320,10 +320,11 @@ mod tests {
             },
             spec: DatabaseMigrationSpec {
                 database: DatabaseSpec {
-                    cnpg_cluster_ref: CnpgClusterRef {
+                    cnpg_cluster_ref: Some(CnpgClusterRef {
                         name: "cluster".to_string(),
                         database: None,
-                    },
+                    }),
+                    direct_ref: None,
                 },
                 migrator: Some(MigratorSpec {
                     name: None,

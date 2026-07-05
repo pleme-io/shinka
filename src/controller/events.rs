@@ -109,21 +109,20 @@ fn common_labels(migration: &DatabaseMigration) -> EventLabels {
         .current_migrator()
         .map(|m| m.migrator_type.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let cluster = &migration.spec.database.cnpg_cluster_ref.name;
+    // display_target/display_database cover both CNPG and direct sources.
+    let cluster = migration.spec.database.display_target();
     let database = migration
         .spec
         .database
-        .cnpg_cluster_ref
-        .database
-        .as_deref()
-        .unwrap_or("default");
+        .display_database()
+        .unwrap_or_else(|| "default".to_string());
 
     EventLabels::new()
         .add("namespace", namespace)
         .add("migration", name)
         .add("migrator", migrator_type)
-        .add("cluster", cluster)
-        .add("database", database)
+        .add("cluster", &cluster)
+        .add("database", &database)
 }
 
 impl EventRecorder {
