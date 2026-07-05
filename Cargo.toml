@@ -84,8 +84,12 @@ prost-types = { version = "0.13", optional = true }
 # Metrics
 prometheus = "0.13"
 
-# Database connection for checksum reconciliation
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres"] }
+# Database connection for checksum reconciliation (postgres) and the direct
+# (non-CNPG) migration source applier (mysql + postgres).
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "mysql"] }
+
+# Async trait for the direct-source migration Environment seam (mockable in tests)
+async-trait = "0.1"
 
 # Cryptographic hashing for checksum calculation
 sha2 = "0.10"

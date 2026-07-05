@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "cargo_lock_sha256": "8eec6a57551ce92b2e75d4ce9607375c7eb7cef7511a29c2338db615b2552a96",
+  "cargo_lock_sha256": "0c883aaeb4711716fe8030e71cbf8e752d576e90257a722b8576448ca3c63b85",
   "target_resolves": {
     "base": {
       "Inflector-0.11.4": {
@@ -10185,6 +10185,16 @@
             "tree": "target"
           },
           {
+            "name": "async_trait",
+            "package_key": "async-trait-0.1.89",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "host"
+          },
+          {
             "name": "axum",
             "package_key": "axum-0.8.9",
             "kind": "normal",
@@ -10367,6 +10377,7 @@
             "package_key": "sqlx-0.8.6",
             "kind": "normal",
             "features": [
+              "mysql",
               "postgres",
               "runtime-tokio",
               "tls-rustls"
@@ -10683,6 +10694,16 @@
             "tree": "host"
           },
           {
+            "name": "sqlx_mysql",
+            "package_key": "sqlx-mysql-0.8.6",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": true,
+            "target": null,
+            "tree": "target"
+          },
+          {
             "name": "sqlx_postgres",
             "package_key": "sqlx-postgres-0.8.6",
             "kind": "normal",
@@ -10702,9 +10723,11 @@
           "json",
           "macros",
           "migrate",
+          "mysql",
           "postgres",
           "runtime-tokio",
           "sqlx-macros",
+          "sqlx-mysql",
           "sqlx-postgres",
           "tls-rustls",
           "tls-rustls-ring",
@@ -11106,6 +11129,7 @@
           "json",
           "macros",
           "migrate",
+          "mysql",
           "postgres"
         ]
       },
@@ -11226,6 +11250,19 @@
             "tree": "target"
           },
           {
+            "name": "sqlx_mysql",
+            "package_key": "sqlx-mysql-0.8.6",
+            "kind": "normal",
+            "features": [
+              "migrate",
+              "offline"
+            ],
+            "uses_default_features": true,
+            "optional": true,
+            "target": null,
+            "tree": "target"
+          },
+          {
             "name": "sqlx_postgres",
             "package_key": "sqlx-postgres-0.8.6",
             "kind": "normal",
@@ -11291,7 +11328,9 @@
           "json",
           "macros",
           "migrate",
+          "mysql",
           "postgres",
+          "sqlx-mysql",
           "sqlx-postgres",
           "tokio"
         ]

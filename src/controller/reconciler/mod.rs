@@ -13,6 +13,7 @@
 mod checksum;
 mod image;
 mod notify;
+mod state_direct;
 mod state_failed;
 mod state_health;
 mod state_migrating;
@@ -40,7 +41,7 @@ use crate::{
         finalizers,
         webhook::OptionalReleaseTrackerClient,
     },
-    crd::{DatabaseMigration, MigrationPhase},
+    crd::{DatabaseMigration, DatabaseSource, MigrationPhase},
     metrics,
     Error,
 };
@@ -138,6 +139,29 @@ async fn reconcile_migration(
     let _start_time = Instant::now();
     let name = migration.name_or_default();
     let namespace = migration.namespace_or_default();
+
+    // Route direct (non-CNPG) sources to the direct-source reconcile branch —
+    // it applies additive DDL in-process (health-skip, no Job, no CNPG cluster).
+    // CNPG sources (and an unresolvable source, which surfaces its typed error
+    // inside the CNPG-only health states) continue through the phase state
+    // machine below, unchanged.
+    if matches!(
+        migration.spec.database.source(),
+        Ok(DatabaseSource::Direct(_))
+    ) {
+        let result = state_direct::handle_direct(&migration, &ctx).await;
+        let _duration = _start_time.elapsed().as_secs_f64();
+        match &result {
+            Ok(_) => metrics::record_reconciliation("success"),
+            Err(e) => {
+                metrics::record_reconciliation("error");
+                metrics::ERRORS_TOTAL
+                    .with_label_values(&[&name, &namespace, e.category()])
+                    .inc();
+            }
+        }
+        return result;
+    }
 
     // Get current phase
     let current_phase = migration

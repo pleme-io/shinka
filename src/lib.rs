@@ -49,6 +49,7 @@ pub mod config;
 pub mod controller;
 pub mod crd;
 pub mod database;
+pub mod direct;
 pub mod error;
 pub mod health;
 pub mod leader;

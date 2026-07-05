@@ -185,11 +185,26 @@ impl DatabaseSpec {
     ///
     /// A direct-source migration yields [`DatabaseSourceError::NotCnpg`] so the
     /// CNPG-only controller states fail typed rather than mis-handling it — this
-    /// is the `LiveTODO(direct-source-reconcile)` boundary.
+    /// is the direct-source-reconcile boundary.
     pub fn require_cnpg_ref(&self) -> Result<&CnpgClusterRef, DatabaseSourceError> {
         match self.source()? {
             DatabaseSource::Cnpg(c) => Ok(c),
             DatabaseSource::Direct(_) => Err(DatabaseSourceError::NotCnpg),
+        }
+    }
+
+    /// Require a direct (non-CNPG) reference (for the direct-source reconcile
+    /// branch).
+    ///
+    /// A CNPG migration yields [`DatabaseSourceError::NotDirect`] so the
+    /// direct-source controller branch fails typed rather than mis-handling a
+    /// CNPG source — the mirror of [`require_cnpg_ref`](Self::require_cnpg_ref).
+    /// The direct branch never polls a CNPG cluster, so resolving through this
+    /// guard *is* the health-skip: a direct source has no cluster to health-check.
+    pub fn require_direct_ref(&self) -> Result<&DirectDatabaseRef, DatabaseSourceError> {
+        match self.source()? {
+            DatabaseSource::Direct(d) => Ok(d),
+            DatabaseSource::Cnpg(_) => Err(DatabaseSourceError::NotDirect),
         }
     }
 
@@ -343,6 +358,8 @@ pub enum DatabaseSourceError {
     BothSources,
     /// A CNPG source was required but the migration targets a direct source.
     NotCnpg,
+    /// A direct source was required but the migration targets a CNPG source.
+    NotDirect,
 }
 
 impl std::fmt::Display for DatabaseSourceError {
@@ -358,7 +375,11 @@ impl std::fmt::Display for DatabaseSourceError {
             ),
             DatabaseSourceError::NotCnpg => write!(
                 f,
-                "database source: a CNPG cluster reference was required but this migration targets a direct (non-CNPG) source — LiveTODO(direct-source-reconcile)"
+                "database source: a CNPG cluster reference was required but this migration targets a direct (non-CNPG) source"
+            ),
+            DatabaseSourceError::NotDirect => write!(
+                f,
+                "database source: a direct (non-CNPG) reference was required but this migration targets a CNPG cluster source"
             ),
         }
     }
@@ -1574,11 +1595,34 @@ mod tests {
             DatabaseSource::Direct(d) => assert_eq!(d.host, "akeyless-saas-akeyless-mysql"),
             DatabaseSource::Cnpg(_) => panic!("expected direct"),
         }
-        // require_cnpg_ref is the LiveTODO boundary: a direct source is typed
+        // require_cnpg_ref is the CNPG-only boundary: a direct source is typed
         // but the CNPG-only reconcile path must fail typed, not mis-handle it.
         assert_eq!(spec.require_cnpg_ref(), Err(DatabaseSourceError::NotCnpg));
+        // require_direct_ref is the direct-source branch boundary: it resolves
+        // the direct ref (the health-skip — no cluster to poll).
+        assert_eq!(
+            spec.require_direct_ref().unwrap().host,
+            "akeyless-saas-akeyless-mysql"
+        );
         assert_eq!(spec.display_target(), "mysql://akeyless-saas-akeyless-mysql");
         assert_eq!(spec.display_database(), Some("authdb".to_string()));
+    }
+
+    #[test]
+    fn test_require_direct_ref_rejects_cnpg() {
+        // The direct-source reconcile branch must fail typed on a CNPG source
+        // rather than mis-handling it — the mirror of require_cnpg_ref.
+        let spec = DatabaseSpec {
+            cnpg_cluster_ref: Some(CnpgClusterRef {
+                name: "pg".to_string(),
+                database: None,
+            }),
+            direct_ref: None,
+        };
+        assert!(matches!(
+            spec.require_direct_ref(),
+            Err(DatabaseSourceError::NotDirect)
+        ));
     }
 
     #[test]
