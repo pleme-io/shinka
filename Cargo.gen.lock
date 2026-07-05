@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "cargo_lock_sha256": "bc38cb42bc21bd93b612d19183a0674d91de3f1ea5c61dbffe93fdb90fce85ff",
+  "cargo_lock_sha256": "b07f065a28908d33fb058718dfa4bd3f7c99ff04075f8c167e34848e21e3660f",
   "target_resolves": {
     "base": {
       "Inflector-0.11.4": {
@@ -1753,7 +1753,7 @@
           "std"
         ]
       },
-      "cc-1.2.65": {
+      "cc-1.2.66": {
         "runtime_dependencies": [
           {
             "name": "find_msvc_tools",
@@ -10159,7 +10159,7 @@
           "default"
         ]
       },
-      "shinka-0.1.6": {
+      "shinka-0.1.7": {
         "runtime_dependencies": [
           {
             "name": "async_graphql",
@@ -14856,7 +14856,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": true,
@@ -15223,7 +15223,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": false,
@@ -15480,7 +15480,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": true,
@@ -15801,7 +15801,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": false,
@@ -16002,7 +16002,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": true,
@@ -16323,7 +16323,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": false,
@@ -16534,7 +16534,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": true,
@@ -16855,7 +16855,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": false,
@@ -17122,7 +17122,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": true,
@@ -17397,7 +17397,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": false,
@@ -17608,7 +17608,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": true,
@@ -17883,7 +17883,7 @@
             "build_dependencies": [
               {
                 "name": "cc",
-                "package_key": "cc-1.2.65",
+                "package_key": "cc-1.2.66",
                 "kind": "build",
                 "features": [],
                 "uses_default_features": false,
@@ -18164,7 +18164,7 @@
     "bytes-1.12.0": {
       "edition": "2021"
     },
-    "cc-1.2.65": {
+    "cc-1.2.66": {
       "edition": "2018"
     },
     "cfg-if-1.0.4": {
@@ -18945,7 +18945,7 @@
     "shikumi-0.1.80-b41d01e453b2c2505941ba02003f48721ca02b17": {
       "edition": "2024"
     },
-    "shinka-0.1.6": {
+    "shinka-0.1.7": {
       "edition": "2021",
       "build_script": "build.rs",
       "lib_target": {
