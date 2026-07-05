@@ -51,6 +51,7 @@ pub mod crd;
 pub mod database;
 pub mod direct;
 pub mod error;
+pub mod extract;
 pub mod health;
 pub mod leader;
 pub mod metrics;

@@ -63,6 +63,20 @@ enum Command {
         namespace: String,
         follow: bool,
     },
+    /// Extract a source database's schema into a shinka base `sqlConfigMapRef`
+    /// ConfigMap (the `/copy-model` extract → feed leg). Connects to a live
+    /// source, introspects its schema, and prints the base ConfigMap YAML.
+    Extract {
+        engine: shinka::crd::DatabaseEngine,
+        host: String,
+        port: Option<u16>,
+        username: Option<String>,
+        /// Databases to include (empty = all user databases).
+        databases: Vec<String>,
+        /// Emitted ConfigMap name + namespace (the feed artifact).
+        configmap_name: String,
+        namespace: String,
+    },
 }
 
 fn parse_args() -> Result<Command, String> {
@@ -156,6 +170,35 @@ fn parse_args() -> Result<Command, String> {
                 follow,
             })
         }
+        "extract" => {
+            let host = find_flag(&args, &["--host"])
+                .ok_or_else(|| format!("extract: --host <HOST> is required\n{}", usage()))?;
+            let engine = match find_flag(&args, &["--engine"]).as_deref() {
+                None | Some("mysql") => shinka::crd::DatabaseEngine::Mysql,
+                Some("postgres") => shinka::crd::DatabaseEngine::Postgres,
+                Some(other) => {
+                    return Err(format!("extract: unknown --engine {other} (mysql|postgres)"))
+                }
+            };
+            let port = find_flag(&args, &["--port"]).and_then(|p| p.parse().ok());
+            let username = find_flag(&args, &["-u", "--username"]);
+            let databases = find_flag(&args, &["--databases", "-d"])
+                .map(|v| v.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default();
+            let configmap_name = find_flag(&args, &["--configmap", "-c"])
+                .unwrap_or_else(|| "shinka-base-schema".to_string());
+            let namespace =
+                find_flag(&args, &["-n", "--namespace"]).unwrap_or_else(|| "default".to_string());
+            Ok(Command::Extract {
+                engine,
+                host,
+                port,
+                username,
+                databases,
+                configmap_name,
+                namespace,
+            })
+        }
         "help" | "-h" | "--help" => Err(usage()),
         cmd => Err(format!("Unknown command: {}\n{}", cmd, usage())),
     }
@@ -186,6 +229,7 @@ COMMANDS:
     retry       Retry a failed migration
     watch       Watch migration status (live updates)
     logs        Get logs from the last migration job
+    extract     Extract a source DB's schema into a shinka base ConfigMap (/copy-model)
     help        Print this help message
 
 OPTIONS:
@@ -194,6 +238,16 @@ OPTIONS:
     --limit <N>             Limit results (for history)
     -f, --follow            Follow logs (for logs command)
 
+EXTRACT OPTIONS (/copy-model extract → feed leg):
+    --engine <mysql|postgres>   Source engine (default: mysql)
+    --host <HOST>               Source database host (required)
+    --port <PORT>               Source port (default: engine standard)
+    -u, --username <USER>       Admin user (default: root/postgres)
+    -d, --databases <a,b,c>     Databases to include (default: all user DBs)
+    -c, --configmap <NAME>      Emitted ConfigMap name (default: shinka-base-schema)
+    -n, --namespace <NS>        Emitted ConfigMap namespace (default: default)
+    (source password is read from $SHINKA_SOURCE_PASSWORD)
+
 EXAMPLES:
     shinka-cli list -n production
     shinka-cli status my-migration -n default
@@ -201,6 +255,8 @@ EXAMPLES:
     shinka-cli retry my-migration -n default
     shinka-cli watch my-migration -n default
     shinka-cli logs my-migration -n default -f
+    SHINKA_SOURCE_PASSWORD=... shinka-cli extract --host mte-mysql \
+        -d authdb,uamdb -c akeyless-schema-apply-sql -n camelot > base.yaml
 "#
     .to_string()
 }
@@ -214,6 +270,35 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    // `extract` addresses an external source database, not the cluster — run it
+    // before (and without) the kube client so it works off-cluster.
+    if let Command::Extract {
+        engine,
+        host,
+        port,
+        username,
+        databases,
+        configmap_name,
+        namespace,
+    } = &command
+    {
+        let result = run_extract(
+            *engine,
+            host,
+            *port,
+            username.as_deref(),
+            databases,
+            configmap_name,
+            namespace,
+        )
+        .await;
+        if let Err(e) = result {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let client = match Client::try_default().await {
         Ok(c) => c,
@@ -241,12 +326,69 @@ async fn main() {
             namespace,
             follow,
         } => show_logs(client, &name, &namespace, follow).await,
+        // Handled before the kube client is created (external source, no cluster).
+        Command::Extract { .. } => unreachable!("extract is handled before client creation"),
     };
 
     if let Err(e) = result {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
+}
+
+/// The `/copy-model` extract → feed leg: introspect a live source database and
+/// print its schema as a shinka base `sqlConfigMapRef` ConfigMap (YAML).
+///
+/// The source password is read from `SHINKA_SOURCE_PASSWORD` (never a CLI arg).
+/// The emitted ConfigMap is the feed artifact: commit it and point a `directRef`
+/// `DatabaseMigration` at it, and shinka's direct branch applies it as the base.
+async fn run_extract(
+    engine: shinka::crd::DatabaseEngine,
+    host: &str,
+    port: Option<u16>,
+    username: Option<&str>,
+    databases: &[String],
+    configmap_name: &str,
+    namespace: &str,
+) -> Result<(), String> {
+    use shinka::direct::DirectConnParams;
+    use shinka::extract::{extract_base, render_base_configmap, DatabaseFilter, SqlxSchemaSource};
+
+    let password = std::env::var("SHINKA_SOURCE_PASSWORD").map_err(|_| {
+        "extract: set SHINKA_SOURCE_PASSWORD to the source admin password".to_string()
+    })?;
+    let params = DirectConnParams {
+        host: host.to_string(),
+        port: port.unwrap_or_else(|| engine.default_port()),
+        username: username
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| engine.default_admin_user().to_string()),
+        password,
+        database: None,
+    };
+    let target = params.to_string();
+    let source = SqlxSchemaSource::new(params, engine, std::time::Duration::from_secs(10));
+    let filter = if databases.is_empty() {
+        DatabaseFilter::All
+    } else {
+        DatabaseFilter::Only(databases.to_vec())
+    };
+
+    let (model, ops) = extract_base(engine, &source, &filter, &target)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    eprintln!(
+        "# extracted {} databases, {} tables, {} columns from {}",
+        model.databases.len(),
+        model.table_count(),
+        model.column_count(),
+        target
+    );
+    let cm = render_base_configmap(configmap_name, namespace, &ops);
+    let yaml = serde_yaml::to_string(&cm).map_err(|e| e.to_string())?;
+    println!("{}", yaml);
+    Ok(())
 }
 
 async fn list_migrations(
