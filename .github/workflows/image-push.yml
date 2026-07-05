@@ -1,0 +1,70 @@
+name: image-push
+
+# shinka's PRIMARY runtime artifact is the OPERATOR IMAGE — the long-running
+# controller (`src/main.rs`, RUN_MODE=operator default) that watches
+# DatabaseMigration CRDs and reconciles them to phase=Ready (direct-source
+# reconcile: directRef health-skip + DATABASE_URL synthesis + /sql load +
+# per-op apply, landed f700a00 / v0.1.6). A cluster that only has the crate on
+# crates.io has NO image to run the reconcile loop, so the CR registers but
+# never reaches Ready — schema-less re-provision. This workflow ships the image
+# on every merge to main.
+#
+# WHY A SEPARATE FILE (not a swap of auto-release.yml): shinka is genuinely
+# dual-natured — it publishes a CRATE to crates.io (the library + the
+# `shinka-wait` init-container binary consumers pin) AND an OPERATOR IMAGE to
+# ghcr.io. auto-release.yml keeps the crate path (cargo-auto-release.yml); THIS
+# file adds the image path. Both ship on merge; neither replaces the other.
+#
+# ★★ AUTO-RELEASE service-image row + ★ AUTOBUMP (org directive
+# pleme-io/CLAUDE.md): the image is a Nix `dockerTools` output — substrate's
+# rust-service-flake exposes `dockerImage-amd64` (a x86_64-linux derivation)
+# and `dockerImage-arm64` (an aarch64-linux derivation). NO Dockerfile
+# (Pillar 8). Each is built on a NATIVE-arch runner so the ELF matches the tag
+# (an off-target build mislabels the arch and `exec format error`s at runtime):
+#   amd64 → ubuntu-24.04       (GitHub-hosted x86_64, free)
+#   arm64 → ubuntu-24.04-arm   (GitHub-hosted aarch64, free)
+# NEVER built on rio (per the image directive: builds fire in CI / in-cluster
+# GHA, never the control plane).
+#
+# ★ AUTOBUMP tag `<arch>-r<run_number>-<sha>`: `r<n>` is the numeric sort key
+# so a subscribing cluster's Flux ImagePolicy can auto-track the newest build;
+# the sha keeps it traceable. `<arch>-latest` is a human-facing moving pointer
+# only — the DEPLOY target is always the exact `r<n>` tag pinned in the
+# cluster's committed `# {"$imagepolicy"}` marker. Official semver releases are
+# cut from this stream on a v* tag when desired.
+#
+# shinka is generic pleme-io open-source, so its build must NOT couple to
+# private rio infra (★★ TOOL DISTRIBUTION) — hosted runners are correct + free.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  image-amd64:
+    name: shinka operator amd64 image → ghcr.io
+    uses: pleme-io/substrate/.github/workflows/image-push.yml@main
+    with:
+      imageAttr: dockerImage-amd64
+      imageName: pleme-io/shinka
+      tag: amd64-r${{ github.run_number }}-${{ github.sha }}
+      additionalTags: amd64-latest
+      runner: ubuntu-24.04
+    secrets: inherit
+
+  image-arm64:
+    name: shinka operator arm64 image → ghcr.io
+    uses: pleme-io/substrate/.github/workflows/image-push.yml@main
+    with:
+      imageAttr: dockerImage-arm64
+      imageName: pleme-io/shinka
+      tag: arm64-r${{ github.run_number }}-${{ github.sha }}
+      additionalTags: arm64-latest
+      runner: ubuntu-24.04-arm
+    secrets: inherit
