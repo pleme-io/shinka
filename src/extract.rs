@@ -318,6 +318,17 @@ pub fn render_base_ops(model: &SchemaModel) -> Vec<SqlOp> {
         .collect()
 }
 
+/// Render one database's additive DDL (create-database + every table) as SQL.
+///
+/// The shared database-DDL surface: [`render_base_ops`] uses it per base op, and
+/// the `/copy-model` **mold** overlay ([`crate::copy_model`]) reuses it to render
+/// a `CreateDatabase` evolution — one DDL renderer, two consumers (Op-Principle
+/// #1: extend the primitive, never duplicate the render). Additive + engine-aware
+/// by construction (`CREATE DATABASE/TABLE IF NOT EXISTS`).
+pub fn render_database_ddl(engine: DatabaseEngine, db: &DatabaseModel) -> String {
+    DatabaseDdl { engine, db }.to_string()
+}
+
 /// The lexically-sortable ConfigMap key for the `idx`-th database's base op.
 fn op_key(idx: usize, db: &str) -> String {
     // Two zero-padded digits keep <100 databases in stable lexical order; the

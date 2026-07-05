@@ -77,6 +77,28 @@ enum Command {
         configmap_name: String,
         namespace: String,
     },
+    /// The full `/copy-model` capability: extract a SOURCE schema and emit the
+    /// absorb-as-base *bundle* (the base `sqlConfigMapRef` ConfigMap **and** the
+    /// `directRef` `DatabaseMigration` CR that points at it) for a TARGET. With
+    /// `--camelot`, the base is projected in the camelot service-dependency order.
+    CopyModel {
+        /// Source (extract-from) connection.
+        engine: shinka::crd::DatabaseEngine,
+        source_host: String,
+        source_port: Option<u16>,
+        source_username: Option<String>,
+        databases: Vec<String>,
+        /// Project in the camelot per-service-DB dependency order.
+        camelot: bool,
+        /// Target (absorb-into) connection the emitted CR addresses.
+        target_host: String,
+        credentials_secret: String,
+        password_key: String,
+        /// Emitted object names + namespace.
+        migration_name: String,
+        configmap_name: String,
+        namespace: String,
+    },
 }
 
 fn parse_args() -> Result<Command, String> {
@@ -199,6 +221,51 @@ fn parse_args() -> Result<Command, String> {
                 namespace,
             })
         }
+        "copy-model" => {
+            let source_host = find_flag(&args, &["--host", "--source-host"])
+                .ok_or_else(|| format!("copy-model: --host <SOURCE_HOST> is required\n{}", usage()))?;
+            let engine = match find_flag(&args, &["--engine"]).as_deref() {
+                None | Some("mysql") => shinka::crd::DatabaseEngine::Mysql,
+                Some("postgres") => shinka::crd::DatabaseEngine::Postgres,
+                Some(other) => {
+                    return Err(format!("copy-model: unknown --engine {other} (mysql|postgres)"))
+                }
+            };
+            let source_port = find_flag(&args, &["--port", "--source-port"]).and_then(|p| p.parse().ok());
+            let source_username = find_flag(&args, &["-u", "--username", "--source-username"]);
+            let databases = find_flag(&args, &["--databases", "-d"])
+                .map(|v| v.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default();
+            let camelot = args.iter().any(|a| a == "--camelot");
+            let target_host = find_flag(&args, &["--target-host"]).ok_or_else(|| {
+                format!("copy-model: --target-host <HOST> is required (the CR applies here)\n{}", usage())
+            })?;
+            let credentials_secret = find_flag(&args, &["--credentials-secret"]).ok_or_else(|| {
+                "copy-model: --credentials-secret <NAME> is required".to_string()
+            })?;
+            let password_key =
+                find_flag(&args, &["--password-key"]).unwrap_or_else(|| "password".to_string());
+            let migration_name = find_flag(&args, &["--name", "--migration-name"])
+                .unwrap_or_else(|| "copy-model".to_string());
+            let configmap_name = find_flag(&args, &["--configmap", "-c"])
+                .unwrap_or_else(|| "shinka-base-schema".to_string());
+            let namespace =
+                find_flag(&args, &["-n", "--namespace"]).unwrap_or_else(|| "default".to_string());
+            Ok(Command::CopyModel {
+                engine,
+                source_host,
+                source_port,
+                source_username,
+                databases,
+                camelot,
+                target_host,
+                credentials_secret,
+                password_key,
+                migration_name,
+                configmap_name,
+                namespace,
+            })
+        }
         "help" | "-h" | "--help" => Err(usage()),
         cmd => Err(format!("Unknown command: {}\n{}", cmd, usage())),
     }
@@ -230,6 +297,7 @@ COMMANDS:
     watch       Watch migration status (live updates)
     logs        Get logs from the last migration job
     extract     Extract a source DB's schema into a shinka base ConfigMap (/copy-model)
+    copy-model  Extract a source schema + emit the absorb-as-base bundle (CM + directRef CR)
     help        Print this help message
 
 OPTIONS:
@@ -257,6 +325,24 @@ EXAMPLES:
     shinka-cli logs my-migration -n default -f
     SHINKA_SOURCE_PASSWORD=... shinka-cli extract --host mte-mysql \
         -d authdb,uamdb -c akeyless-schema-apply-sql -n camelot > base.yaml
+
+COPY-MODEL OPTIONS (/copy-model — extract SOURCE + emit absorb-as-base bundle):
+    --host <SOURCE_HOST>          Source database host to extract from (required)
+    --engine <mysql|postgres>     Source engine (default: mysql)
+    -d, --databases <a,b,c>       Databases to include (default: all user DBs)
+    --camelot                     Project in the camelot service-dependency order
+    --target-host <HOST>          Target host the emitted directRef CR applies into (required)
+    --credentials-secret <NAME>   Target admin-credentials Secret (required)
+    --password-key <KEY>          Key in that Secret holding the password (default: password)
+    --name <NAME>                 Emitted DatabaseMigration name (default: copy-model)
+    -c, --configmap <NAME>        Emitted base ConfigMap name (default: shinka-base-schema)
+    -n, --namespace <NS>          Emitted objects' namespace (default: default)
+    (source password is read from $SHINKA_SOURCE_PASSWORD)
+
+    SHINKA_SOURCE_PASSWORD=... shinka-cli copy-model --host mte-mysql \
+        -d authdb,uamdb --camelot --target-host akeyless-saas-akeyless-mysql \
+        --credentials-secret akeyless-mysql-root -c akeyless-schema-apply-sql \
+        --name copy-model-camelot -n camelot > absorb-bundle.yaml
 "#
     .to_string()
 }
@@ -300,6 +386,45 @@ async fn main() {
         return;
     }
 
+    // `copy-model` likewise addresses an external SOURCE database (extract), and
+    // emits static artifacts (no cluster access needed) — run it off-cluster too.
+    if let Command::CopyModel {
+        engine,
+        source_host,
+        source_port,
+        source_username,
+        databases,
+        camelot,
+        target_host,
+        credentials_secret,
+        password_key,
+        migration_name,
+        configmap_name,
+        namespace,
+    } = &command
+    {
+        let result = run_copy_model(
+            *engine,
+            source_host,
+            *source_port,
+            source_username.as_deref(),
+            databases,
+            *camelot,
+            target_host,
+            credentials_secret,
+            password_key,
+            migration_name,
+            configmap_name,
+            namespace,
+        )
+        .await;
+        if let Err(e) = result {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let client = match Client::try_default().await {
         Ok(c) => c,
         Err(e) => {
@@ -328,6 +453,7 @@ async fn main() {
         } => show_logs(client, &name, &namespace, follow).await,
         // Handled before the kube client is created (external source, no cluster).
         Command::Extract { .. } => unreachable!("extract is handled before client creation"),
+        Command::CopyModel { .. } => unreachable!("copy-model is handled before client creation"),
     };
 
     if let Err(e) = result {
@@ -388,6 +514,89 @@ async fn run_extract(
     let cm = render_base_configmap(configmap_name, namespace, &ops);
     let yaml = serde_yaml::to_string(&cm).map_err(|e| e.to_string())?;
     println!("{}", yaml);
+    Ok(())
+}
+
+/// The full `/copy-model` capability: extract a SOURCE schema, (optionally)
+/// project it in the camelot service-dependency order, and print the
+/// absorb-as-base *bundle* — the base `sqlConfigMapRef` ConfigMap **and** the
+/// `directRef` `DatabaseMigration` that points at it — as a two-document YAML.
+/// Commit both; shinka's direct branch absorbs the schema as the base against
+/// the target.
+#[allow(clippy::too_many_arguments)]
+async fn run_copy_model(
+    engine: shinka::crd::DatabaseEngine,
+    source_host: &str,
+    source_port: Option<u16>,
+    source_username: Option<&str>,
+    databases: &[String],
+    camelot: bool,
+    target_host: &str,
+    credentials_secret: &str,
+    password_key: &str,
+    migration_name: &str,
+    configmap_name: &str,
+    namespace: &str,
+) -> Result<(), String> {
+    use shinka::copy_model::{project_camelot, render_bundle, AbsorbTarget};
+    use shinka::direct::DirectConnParams;
+    use shinka::extract::{extract_base, DatabaseFilter, SqlxSchemaSource};
+
+    let password = std::env::var("SHINKA_SOURCE_PASSWORD").map_err(|_| {
+        "copy-model: set SHINKA_SOURCE_PASSWORD to the SOURCE admin password".to_string()
+    })?;
+    let params = DirectConnParams {
+        host: source_host.to_string(),
+        port: source_port.unwrap_or_else(|| engine.default_port()),
+        username: source_username
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| engine.default_admin_user().to_string()),
+        password,
+        database: None,
+    };
+    let target_label = params.to_string();
+    let source = SqlxSchemaSource::new(params, engine, std::time::Duration::from_secs(10));
+    let filter = if databases.is_empty() {
+        DatabaseFilter::All
+    } else {
+        DatabaseFilter::Only(databases.to_vec())
+    };
+
+    let (model, base_ops) = extract_base(engine, &source, &filter, &target_label)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Project in camelot dependency order when asked; otherwise keep extract order.
+    let ops = if camelot {
+        project_camelot(&model)
+    } else {
+        base_ops
+    };
+
+    eprintln!(
+        "# copy-model: {} databases, {} tables, {} columns from {} → absorb as base into {}",
+        model.databases.len(),
+        model.table_count(),
+        model.column_count(),
+        target_label,
+        target_host
+    );
+
+    let target = AbsorbTarget {
+        migration_name: migration_name.to_string(),
+        namespace: namespace.to_string(),
+        config_map_name: configmap_name.to_string(),
+        engine,
+        target_host: target_host.to_string(),
+        credentials_secret: credentials_secret.to_string(),
+        password_key: password_key.to_string(),
+    };
+    let bundle = render_bundle(&ops, &target);
+
+    let cm_yaml = serde_yaml::to_string(&bundle.config_map).map_err(|e| e.to_string())?;
+    let mig_yaml = serde_yaml::to_string(&bundle.migration).map_err(|e| e.to_string())?;
+    // Two-document YAML: ConfigMap first (created before the CR references it).
+    println!("{}---\n{}", cm_yaml, mig_yaml);
     Ok(())
 }
 

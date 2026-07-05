@@ -47,6 +47,7 @@ pub mod api;
 pub mod circuit_breaker;
 pub mod config;
 pub mod controller;
+pub mod copy_model;
 pub mod crd;
 pub mod database;
 pub mod direct;
