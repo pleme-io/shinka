@@ -795,6 +795,7 @@ mod tests {
                 database: DatabaseSpec {
                     cnpg_cluster_ref: None,
                     direct_ref: Some(direct_ref()),
+                    clickhouse_ref: None,
                 },
                 migrator: None,
                 migrators: None,
@@ -949,6 +950,7 @@ mod tests {
                 database: None,
             }),
             direct_ref: None,
+            clickhouse_ref: None,
         };
         let env = MockDirectEnv::healthy(two_ops());
         let err = plan_and_apply_direct(&m, &env).await.expect_err("cnpg rejected");

@@ -45,6 +45,7 @@
 
 pub mod api;
 pub mod circuit_breaker;
+pub mod clickhouse;
 pub mod config;
 pub mod controller;
 pub mod copy_model;

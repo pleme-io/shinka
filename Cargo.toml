@@ -88,6 +88,14 @@ prometheus = "0.13"
 # (non-CNPG) migration source applier (mysql + postgres).
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "mysql"] }
 
+# Typed ClickHouse table model (the events table AST + Display emission) — the
+# single source of truth for the clickhouseRef converge source's DDL.
+analitico = { path = "../analitico" }
+
+# ClickHouse HTTP client (port 8123) for the clickhouseRef converge source:
+# read the live schema (system.tables) and apply typed CREATE TABLE DDL.
+clickhouse = { version = "0.13", default-features = false }
+
 # Async trait for the direct-source migration Environment seam (mockable in tests)
 async-trait = "0.1"
 

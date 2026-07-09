@@ -161,9 +161,20 @@ pub struct DatabaseSpec {
     pub cnpg_cluster_ref: Option<CnpgClusterRef>,
 
     /// Reference to a direct (non-CNPG) database connection. Mutually exclusive
-    /// with `cnpgClusterRef`; exactly one MUST be set.
+    /// with `cnpgClusterRef`/`clickhouseRef`; exactly one MUST be set.
     #[serde(default, rename = "directRef", skip_serializing_if = "Option::is_none")]
     pub direct_ref: Option<DirectDatabaseRef>,
+
+    /// Reference to a ClickHouse **typed-model** source: a create-only converge
+    /// of an `analitico` typed table model against a Keeper-backed ClickHouse
+    /// (`ON CLUSTER`, `ReplicatedMergeTree`). Mutually exclusive with
+    /// `cnpgClusterRef`/`directRef`; exactly one MUST be set.
+    #[serde(
+        default,
+        rename = "clickhouseRef",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub clickhouse_ref: Option<ClickHouseModelRef>,
 }
 
 impl DatabaseSpec {
@@ -173,38 +184,64 @@ impl DatabaseSpec {
     /// and [`DatabaseSourceError::BothSources`] when both are (they are
     /// mutually exclusive by construction).
     pub fn source(&self) -> Result<DatabaseSource<'_>, DatabaseSourceError> {
-        match (&self.cnpg_cluster_ref, &self.direct_ref) {
-            (Some(_), Some(_)) => Err(DatabaseSourceError::BothSources),
-            (None, None) => Err(DatabaseSourceError::NoSource),
-            (Some(c), None) => Ok(DatabaseSource::Cnpg(c)),
-            (None, Some(d)) => Ok(DatabaseSource::Direct(d)),
+        match (&self.cnpg_cluster_ref, &self.direct_ref, &self.clickhouse_ref) {
+            (Some(c), None, None) => Ok(DatabaseSource::Cnpg(c)),
+            (None, Some(d), None) => Ok(DatabaseSource::Direct(d)),
+            (None, None, Some(ch)) => Ok(DatabaseSource::ClickHouse(ch)),
+            (None, None, None) => Err(DatabaseSourceError::NoSource),
+            // Any combination with more than one reference set is mutually
+            // exclusive by construction.
+            _ => Err(DatabaseSourceError::BothSources),
         }
     }
 
     /// Require a CNPG cluster reference (for the CNPG-only reconcile paths).
     ///
-    /// A direct-source migration yields [`DatabaseSourceError::NotCnpg`] so the
-    /// CNPG-only controller states fail typed rather than mis-handling it — this
-    /// is the direct-source-reconcile boundary.
+    /// A non-CNPG source yields [`DatabaseSourceError::NotCnpg`] so the CNPG-only
+    /// controller states fail typed rather than mis-handling it — this is the
+    /// non-CNPG-reconcile boundary.
     pub fn require_cnpg_ref(&self) -> Result<&CnpgClusterRef, DatabaseSourceError> {
         match self.source()? {
             DatabaseSource::Cnpg(c) => Ok(c),
-            DatabaseSource::Direct(_) => Err(DatabaseSourceError::NotCnpg),
+            DatabaseSource::Direct(_) | DatabaseSource::ClickHouse(_) => {
+                Err(DatabaseSourceError::NotCnpg)
+            }
         }
     }
 
     /// Require a direct (non-CNPG) reference (for the direct-source reconcile
     /// branch).
     ///
-    /// A CNPG migration yields [`DatabaseSourceError::NotDirect`] so the
-    /// direct-source controller branch fails typed rather than mis-handling a
-    /// CNPG source — the mirror of [`require_cnpg_ref`](Self::require_cnpg_ref).
-    /// The direct branch never polls a CNPG cluster, so resolving through this
-    /// guard *is* the health-skip: a direct source has no cluster to health-check.
+    /// A CNPG or ClickHouse migration yields [`DatabaseSourceError::NotDirect`]
+    /// so the direct-source controller branch fails typed rather than
+    /// mis-handling another source — the mirror of
+    /// [`require_cnpg_ref`](Self::require_cnpg_ref). The direct branch never
+    /// polls a CNPG cluster, so resolving through this guard *is* the
+    /// health-skip: a direct source has no cluster to health-check.
     pub fn require_direct_ref(&self) -> Result<&DirectDatabaseRef, DatabaseSourceError> {
         match self.source()? {
             DatabaseSource::Direct(d) => Ok(d),
-            DatabaseSource::Cnpg(_) => Err(DatabaseSourceError::NotDirect),
+            DatabaseSource::Cnpg(_) | DatabaseSource::ClickHouse(_) => {
+                Err(DatabaseSourceError::NotDirect)
+            }
+        }
+    }
+
+    /// Require a ClickHouse typed-model reference (for the ClickHouse converge
+    /// branch).
+    ///
+    /// A CNPG or direct migration yields [`DatabaseSourceError::NotClickHouse`]
+    /// so the ClickHouse converge branch fails typed rather than mis-handling
+    /// another source — the third mirror of
+    /// [`require_cnpg_ref`](Self::require_cnpg_ref). Like the direct branch, a
+    /// ClickHouse source has no CNPG cluster to poll, so resolving through this
+    /// guard *is* the health-skip.
+    pub fn require_clickhouse_ref(&self) -> Result<&ClickHouseModelRef, DatabaseSourceError> {
+        match self.source()? {
+            DatabaseSource::ClickHouse(ch) => Ok(ch),
+            DatabaseSource::Cnpg(_) | DatabaseSource::Direct(_) => {
+                Err(DatabaseSourceError::NotClickHouse)
+            }
         }
     }
 
@@ -216,6 +253,7 @@ impl DatabaseSpec {
         match self.source() {
             Ok(DatabaseSource::Cnpg(c)) => c.name.clone(),
             Ok(DatabaseSource::Direct(d)) => format!("{}://{}", d.engine, d.host),
+            Ok(DatabaseSource::ClickHouse(ch)) => format!("clickhouse://{}/{}", ch.host, ch.database),
             Err(_) => "<unset>".to_string(),
         }
     }
@@ -225,6 +263,7 @@ impl DatabaseSpec {
         match self.source() {
             Ok(DatabaseSource::Cnpg(c)) => c.database.clone(),
             Ok(DatabaseSource::Direct(d)) => d.database.clone(),
+            Ok(DatabaseSource::ClickHouse(ch)) => Some(ch.database.clone()),
             Err(_) => None,
         }
     }
@@ -347,19 +386,23 @@ pub enum DatabaseSource<'a> {
     Cnpg(&'a CnpgClusterRef),
     /// A direct (non-CNPG) engine connection.
     Direct(&'a DirectDatabaseRef),
+    /// A ClickHouse typed-model converge source (create-only, `ON CLUSTER`).
+    ClickHouse(&'a ClickHouseModelRef),
 }
 
 /// Error resolving a [`DatabaseSpec`] to exactly one source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DatabaseSourceError {
-    /// Neither `cnpgClusterRef` nor `directRef` was set.
+    /// None of `cnpgClusterRef` / `directRef` / `clickhouseRef` was set.
     NoSource,
-    /// Both `cnpgClusterRef` and `directRef` were set (mutually exclusive).
+    /// More than one source reference was set (they are mutually exclusive).
     BothSources,
-    /// A CNPG source was required but the migration targets a direct source.
+    /// A CNPG source was required but the migration targets another source.
     NotCnpg,
-    /// A direct source was required but the migration targets a CNPG source.
+    /// A direct source was required but the migration targets another source.
     NotDirect,
+    /// A ClickHouse source was required but the migration targets another source.
+    NotClickHouse,
 }
 
 impl std::fmt::Display for DatabaseSourceError {
@@ -367,25 +410,132 @@ impl std::fmt::Display for DatabaseSourceError {
         match self {
             DatabaseSourceError::NoSource => write!(
                 f,
-                "database source: exactly one of cnpgClusterRef or directRef must be set (found neither)"
+                "database source: exactly one of cnpgClusterRef, directRef or clickhouseRef must be set (found none)"
             ),
             DatabaseSourceError::BothSources => write!(
                 f,
-                "database source: cnpgClusterRef and directRef are mutually exclusive (found both)"
+                "database source: cnpgClusterRef, directRef and clickhouseRef are mutually exclusive (found more than one)"
             ),
             DatabaseSourceError::NotCnpg => write!(
                 f,
-                "database source: a CNPG cluster reference was required but this migration targets a direct (non-CNPG) source"
+                "database source: a CNPG cluster reference was required but this migration targets a non-CNPG source"
             ),
             DatabaseSourceError::NotDirect => write!(
                 f,
-                "database source: a direct (non-CNPG) reference was required but this migration targets a CNPG cluster source"
+                "database source: a direct (non-CNPG) reference was required but this migration targets another source"
+            ),
+            DatabaseSourceError::NotClickHouse => write!(
+                f,
+                "database source: a ClickHouse reference was required but this migration targets another source"
             ),
         }
     }
 }
 
 impl std::error::Error for DatabaseSourceError {}
+
+/// The typed ClickHouse model a [`ClickHouseModelRef`] converges.
+///
+/// A closed enum: each variant names one `analitico` typed table model. M0
+/// ships exactly the clustered, Keeper-replicated `events` table; adding a
+/// model is a new arm here plus a build rule in `crate::clickhouse`, never a
+/// free-form DDL string on the CRD.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClickHouseModel {
+    /// The `analitico` clustered events table:
+    /// `{timestamp DateTime64(3), source LowCardinality(String),
+    /// level LowCardinality(String), message String, raw String}` on a
+    /// `ReplicatedMergeTree`, partitioned by `toYYYYMMDD(timestamp)`.
+    #[default]
+    Events,
+}
+
+impl std::fmt::Display for ClickHouseModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ClickHouseModel::Events => write!(f, "events"),
+        }
+    }
+}
+
+/// Reference to a ClickHouse typed-model converge source.
+///
+/// Unlike `directRef` (which applies operator-authored SQL from a ConfigMap),
+/// a ClickHouse source carries **no SQL** — it names a typed `analitico` model
+/// ([`ClickHouseModel`]) and the connection coordinates. The controller renders
+/// the model to a typed `CREATE TABLE ... ON CLUSTER ... ReplicatedMergeTree`
+/// and converges it create-only against the live schema. The rendered model is
+/// content-addressed into `status.lastMigration.imageTag` as `chmodel-<hex>`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ClickHouseModelRef {
+    /// Which typed `analitico` model to converge (defaults to `events`).
+    #[serde(default)]
+    pub model: ClickHouseModel,
+
+    /// ClickHouse HTTP service hostname (e.g. `clickhouse.monitoring.svc`).
+    pub host: String,
+
+    /// HTTP port (defaults to 8123).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+
+    /// The target database the model is created in (e.g. `tendril`).
+    pub database: String,
+
+    /// The distributed-DDL cluster for `ON CLUSTER` (e.g. `tendril`).
+    pub cluster: String,
+
+    /// Override the model's canonical table name (defaults to the model's own
+    /// name, e.g. `events`). A distinct name (e.g. `events_m0`) lets a converge
+    /// prove itself without clobbering a live table of the canonical name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<String>,
+
+    /// ClickHouse username (defaults to `default`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+
+    /// Secret holding the ClickHouse password.
+    #[serde(rename = "credentialsSecretRef")]
+    pub credentials_secret_ref: SecretRef,
+
+    /// Key within `credentialsSecretRef` holding the password (defaults to
+    /// `clickhouse-password`).
+    #[serde(
+        default = "default_clickhouse_password_key",
+        rename = "passwordKey"
+    )]
+    pub password_key: String,
+}
+
+fn default_clickhouse_password_key() -> String {
+    "clickhouse-password".to_string()
+}
+
+impl ClickHouseModelRef {
+    /// Effective HTTP port (explicit, else 8123).
+    pub fn effective_port(&self) -> u16 {
+        self.port.unwrap_or(8123)
+    }
+
+    /// Effective username (explicit, else `default`).
+    pub fn effective_username(&self) -> &str {
+        match &self.username {
+            Some(u) => u.as_str(),
+            None => "default",
+        }
+    }
+
+    /// Effective (unqualified) table name (explicit override, else the model's
+    /// canonical name).
+    pub fn effective_table(&self) -> String {
+        match &self.table {
+            Some(t) => t.clone(),
+            None => self.model.to_string(),
+        }
+    }
+}
 
 /// Migrator configuration - which deployment and tool to use for migrations
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1049,6 +1199,7 @@ mod tests {
                         database: Some("mydb".to_string()),
                     }),
                     direct_ref: None,
+                    clickhouse_ref: None,
                 },
                 migrator: Some(MigratorSpec {
                     name: None,
@@ -1575,10 +1726,11 @@ mod tests {
                 database: Some("app".to_string()),
             }),
             direct_ref: None,
+            clickhouse_ref: None,
         };
         match spec.source().expect("cnpg source resolves") {
             DatabaseSource::Cnpg(c) => assert_eq!(c.name, "pg"),
-            DatabaseSource::Direct(_) => panic!("expected cnpg"),
+            DatabaseSource::Direct(_) | DatabaseSource::ClickHouse(_) => panic!("expected cnpg"),
         }
         assert_eq!(spec.require_cnpg_ref().unwrap().name, "pg");
         assert_eq!(spec.display_target(), "pg");
@@ -1590,10 +1742,11 @@ mod tests {
         let spec = DatabaseSpec {
             cnpg_cluster_ref: None,
             direct_ref: Some(direct_ref()),
+            clickhouse_ref: None,
         };
         match spec.source().expect("direct source resolves") {
             DatabaseSource::Direct(d) => assert_eq!(d.host, "akeyless-saas-akeyless-mysql"),
-            DatabaseSource::Cnpg(_) => panic!("expected direct"),
+            DatabaseSource::Cnpg(_) | DatabaseSource::ClickHouse(_) => panic!("expected direct"),
         }
         // require_cnpg_ref is the CNPG-only boundary: a direct source is typed
         // but the CNPG-only reconcile path must fail typed, not mis-handle it.
@@ -1618,6 +1771,7 @@ mod tests {
                 database: None,
             }),
             direct_ref: None,
+            clickhouse_ref: None,
         };
         assert!(matches!(
             spec.require_direct_ref(),
@@ -1630,6 +1784,7 @@ mod tests {
         let spec = DatabaseSpec {
             cnpg_cluster_ref: None,
             direct_ref: None,
+            clickhouse_ref: None,
         };
         assert!(matches!(spec.source(), Err(DatabaseSourceError::NoSource)));
         assert_eq!(spec.display_target(), "<unset>");
@@ -1644,6 +1799,7 @@ mod tests {
                 database: None,
             }),
             direct_ref: Some(direct_ref()),
+            clickhouse_ref: None,
         };
         assert!(matches!(
             spec.source(),
@@ -1697,13 +1853,133 @@ mod tests {
         let spec = DatabaseSpec {
             cnpg_cluster_ref: None,
             direct_ref: Some(direct_ref()),
+            clickhouse_ref: None,
         };
         let json = serde_json::to_string(&spec).unwrap();
         assert!(json.contains("directRef"));
         assert!(!json.contains("cnpgClusterRef"));
+        assert!(!json.contains("clickhouseRef"));
         let back: DatabaseSpec = serde_json::from_str(&json).unwrap();
         assert_eq!(back.direct_ref.as_ref().unwrap().engine, DatabaseEngine::Mysql);
         assert_eq!(back.direct_ref.as_ref().unwrap().password_key, "root-password");
+    }
+
+    // =========================================================================
+    // ClickHouse typed-model database-source tests
+    // =========================================================================
+
+    fn clickhouse_ref() -> ClickHouseModelRef {
+        ClickHouseModelRef {
+            model: ClickHouseModel::Events,
+            host: "clickhouse.monitoring.svc".to_string(),
+            port: None,
+            database: "tendril".to_string(),
+            cluster: "tendril".to_string(),
+            table: None,
+            username: None,
+            credentials_secret_ref: SecretRef {
+                name: "clickhouse-auth".to_string(),
+            },
+            password_key: "clickhouse-password".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_database_source_clickhouse_only() {
+        let spec = DatabaseSpec {
+            cnpg_cluster_ref: None,
+            direct_ref: None,
+            clickhouse_ref: Some(clickhouse_ref()),
+        };
+        match spec.source().expect("clickhouse source resolves") {
+            DatabaseSource::ClickHouse(ch) => assert_eq!(ch.database, "tendril"),
+            DatabaseSource::Cnpg(_) | DatabaseSource::Direct(_) => panic!("expected clickhouse"),
+        }
+        // The two sibling guards reject a ClickHouse source typed.
+        assert_eq!(spec.require_cnpg_ref(), Err(DatabaseSourceError::NotCnpg));
+        assert_eq!(spec.require_direct_ref().unwrap_err(), DatabaseSourceError::NotDirect);
+        // require_clickhouse_ref resolves it (the health-skip — no CNPG cluster).
+        assert_eq!(spec.require_clickhouse_ref().unwrap().cluster, "tendril");
+        assert_eq!(spec.display_target(), "clickhouse://clickhouse.monitoring.svc/tendril");
+        assert_eq!(spec.display_database(), Some("tendril".to_string()));
+    }
+
+    #[test]
+    fn test_require_clickhouse_ref_rejects_other_sources() {
+        let cnpg = DatabaseSpec {
+            cnpg_cluster_ref: Some(CnpgClusterRef {
+                name: "pg".to_string(),
+                database: None,
+            }),
+            direct_ref: None,
+            clickhouse_ref: None,
+        };
+        assert!(matches!(
+            cnpg.require_clickhouse_ref(),
+            Err(DatabaseSourceError::NotClickHouse)
+        ));
+        let direct = DatabaseSpec {
+            cnpg_cluster_ref: None,
+            direct_ref: Some(direct_ref()),
+            clickhouse_ref: None,
+        };
+        assert!(matches!(
+            direct.require_clickhouse_ref(),
+            Err(DatabaseSourceError::NotClickHouse)
+        ));
+    }
+
+    #[test]
+    fn test_clickhouse_ref_effective_defaults() {
+        let mut ch = clickhouse_ref();
+        assert_eq!(ch.effective_port(), 8123);
+        assert_eq!(ch.effective_username(), "default");
+        assert_eq!(ch.effective_table(), "events"); // model canonical name
+        ch.port = Some(18123);
+        ch.username = Some("tendril".to_string());
+        ch.table = Some("events_m0".to_string());
+        assert_eq!(ch.effective_port(), 18123);
+        assert_eq!(ch.effective_username(), "tendril");
+        assert_eq!(ch.effective_table(), "events_m0");
+    }
+
+    #[test]
+    fn test_clickhouse_model_display_and_serde() {
+        assert_eq!(ClickHouseModel::Events.to_string(), "events");
+        assert_eq!(
+            serde_json::to_string(&ClickHouseModel::Events).unwrap(),
+            "\"events\""
+        );
+        assert_eq!(ClickHouseModel::default(), ClickHouseModel::Events);
+    }
+
+    #[test]
+    fn test_database_spec_clickhouse_wire_roundtrip() {
+        let spec = DatabaseSpec {
+            cnpg_cluster_ref: None,
+            direct_ref: None,
+            clickhouse_ref: Some(clickhouse_ref()),
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(json.contains("clickhouseRef"));
+        assert!(!json.contains("cnpgClusterRef"));
+        assert!(!json.contains("directRef"));
+        let back: DatabaseSpec = serde_json::from_str(&json).unwrap();
+        let ch = back.clickhouse_ref.as_ref().unwrap();
+        assert_eq!(ch.model, ClickHouseModel::Events);
+        assert_eq!(ch.database, "tendril");
+        assert_eq!(ch.password_key, "clickhouse-password");
+    }
+
+    #[test]
+    fn test_clickhouse_ref_password_key_defaults_on_wire() {
+        // Omitting passwordKey defaults to `clickhouse-password`.
+        let json = r#"{"clickhouseRef":{"host":"h","database":"tendril","cluster":"tendril","credentialsSecretRef":{"name":"clickhouse-auth"}}}"#;
+        let spec: DatabaseSpec = serde_json::from_str(json).unwrap();
+        let ch = spec.clickhouse_ref.as_ref().unwrap();
+        assert_eq!(ch.password_key, "clickhouse-password");
+        assert_eq!(ch.model, ClickHouseModel::Events);
+        assert_eq!(ch.effective_port(), 8123);
     }
 }
 

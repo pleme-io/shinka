@@ -324,6 +324,7 @@ pub fn render_directref_migration(target: &AbsorbTarget) -> DatabaseMigration {
                     name: target.config_map_name.clone(),
                 },
             }),
+            clickhouse_ref: None,
         },
         migrator: None,
         migrators: None,
