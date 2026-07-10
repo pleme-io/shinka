@@ -564,11 +564,20 @@ impl DirectMigrationEnv for KubeDirectEnv {
 }
 
 /// Apply ops against a MySQL source via the typed `MySqlConnectOptions` builder.
+///
+/// SeaORM-native (theory/SHINKA-MODEL-EVOLUTION.md §VII M0): the pool is built
+/// exactly as before (the typed `*ConnectOptions` builder avoids
+/// password-URL-escaping bugs); it is then wrapped into a SeaORM
+/// `DatabaseConnection` via [`SqlxMySqlConnector::from_sqlx_mysql_pool`], and
+/// each statement runs through [`ConnectionTrait::execute_unprepared`] — SeaORM's
+/// arbitrary-DDL-string entry point, which needs no query builder and matches
+/// the prior raw-string-per-statement behaviour exactly.
 async fn apply_mysql(
     params: &DirectConnParams,
     ops: &[SqlOp],
     connect_timeout: Duration,
 ) -> Result<AppliedReport, DirectError> {
+    use sea_orm::{ConnectionTrait, SqlxMySqlConnector};
     use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
 
     let mut opts = MySqlConnectOptions::new()
@@ -589,12 +598,12 @@ async fn apply_mysql(
             target: params.to_string(),
             message: e.to_string(),
         })?;
+    let conn = SqlxMySqlConnector::from_sqlx_mysql_pool(pool);
 
     let mut total = 0usize;
     for op in ops {
         for (idx, stmt) in split_sql_statements(&op.sql).into_iter().enumerate() {
-            sqlx::query(stmt.as_str())
-                .execute(&pool)
+            conn.execute_unprepared(&stmt)
                 .await
                 .map_err(|e| DirectError::Apply {
                     op: op.name.clone(),
@@ -604,7 +613,10 @@ async fn apply_mysql(
             total += 1;
         }
     }
-    pool.close().await;
+    // Fire-and-forget, matching the prior `sqlx::Pool::close()` semantics: all ops
+    // already applied successfully, so a close-time hiccup must not turn a
+    // completed migration into a reported failure.
+    let _ = conn.close().await;
 
     Ok(AppliedReport {
         ops: ops.len(),
@@ -613,11 +625,17 @@ async fn apply_mysql(
 }
 
 /// Apply ops against a Postgres source via the typed `PgConnectOptions` builder.
+///
+/// SeaORM-native (theory/SHINKA-MODEL-EVOLUTION.md §VII M0): same conversion as
+/// [`apply_mysql`] — pool construction unchanged, wrapped via
+/// [`SqlxPostgresConnector::from_sqlx_postgres_pool`], DDL applied through
+/// [`ConnectionTrait::execute_unprepared`].
 async fn apply_postgres(
     params: &DirectConnParams,
     ops: &[SqlOp],
     connect_timeout: Duration,
 ) -> Result<AppliedReport, DirectError> {
+    use sea_orm::{ConnectionTrait, SqlxPostgresConnector};
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
     let mut opts = PgConnectOptions::new()
@@ -638,12 +656,12 @@ async fn apply_postgres(
             target: params.to_string(),
             message: e.to_string(),
         })?;
+    let conn = SqlxPostgresConnector::from_sqlx_postgres_pool(pool);
 
     let mut total = 0usize;
     for op in ops {
         for (idx, stmt) in split_sql_statements(&op.sql).into_iter().enumerate() {
-            sqlx::query(stmt.as_str())
-                .execute(&pool)
+            conn.execute_unprepared(&stmt)
                 .await
                 .map_err(|e| DirectError::Apply {
                     op: op.name.clone(),
@@ -653,7 +671,10 @@ async fn apply_postgres(
             total += 1;
         }
     }
-    pool.close().await;
+    // Fire-and-forget, matching the prior `sqlx::Pool::close()` semantics: all ops
+    // already applied successfully, so a close-time hiccup must not turn a
+    // completed migration into a reported failure.
+    let _ = conn.close().await;
 
     Ok(AppliedReport {
         ops: ops.len(),

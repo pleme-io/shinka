@@ -88,6 +88,13 @@ prometheus = "0.13"
 # (non-CNPG) migration source applier (mysql + postgres).
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "mysql"] }
 
+# SeaORM-native connection layer (theory/SHINKA-MODEL-EVOLUTION.md §VII): wraps
+# the existing sqlx pool (from_sqlx_{mysql,postgres}_pool) so DDL apply runs
+# through ConnectionTrait::execute_unprepared instead of raw sqlx::query. sea-schema
+# (M1+) will replace extract.rs's hand-rolled information_schema introspection.
+sea-orm = { version = "1", features = ["sqlx-mysql", "sqlx-postgres", "runtime-tokio-rustls"] }
+sea-schema = { version = "0.16", features = ["mysql", "postgres", "discovery"] }
+
 # Async trait for the direct-source migration Environment seam (mockable in tests)
 async-trait = "0.1"
 
