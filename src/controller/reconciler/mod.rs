@@ -13,6 +13,7 @@
 mod checksum;
 mod image;
 mod notify;
+mod state_clickhouse;
 mod state_direct;
 mod state_failed;
 mod state_health;
@@ -140,27 +141,26 @@ async fn reconcile_migration(
     let name = migration.name_or_default();
     let namespace = migration.namespace_or_default();
 
-    // Route direct (non-CNPG) sources to the direct-source reconcile branch —
-    // it applies additive DDL in-process (health-skip, no Job, no CNPG cluster).
-    // CNPG sources (and an unresolvable source, which surfaces its typed error
-    // inside the CNPG-only health states) continue through the phase state
-    // machine below, unchanged.
-    if matches!(
-        migration.spec.database.source(),
-        Ok(DatabaseSource::Direct(_))
-    ) {
-        let result = state_direct::handle_direct(&migration, &ctx).await;
-        let _duration = _start_time.elapsed().as_secs_f64();
-        match &result {
-            Ok(_) => metrics::record_reconciliation("success"),
-            Err(e) => {
-                metrics::record_reconciliation("error");
-                metrics::ERRORS_TOTAL
-                    .with_label_values(&[&name, &namespace, e.category()])
-                    .inc();
-            }
+    // Route non-CNPG sources to their in-process reconcile branch (health-skip,
+    // no Job, no CNPG cluster). CNPG sources (and an unresolvable source, which
+    // surfaces its typed error inside the CNPG-only health states) continue
+    // through the phase state machine below, unchanged.
+    //
+    // - `directRef`     → apply additive DDL from a ConfigMap.
+    // - `clickhouseRef` → converge a typed analitico model (create-only,
+    //                     ON CLUSTER, ReplicatedMergeTree).
+    match migration.spec.database.source() {
+        Ok(DatabaseSource::Direct(_)) => {
+            let result = state_direct::handle_direct(&migration, &ctx).await;
+            record_branch_metrics(&result, &name, &namespace, _start_time);
+            return result;
         }
-        return result;
+        Ok(DatabaseSource::ClickHouse(_)) => {
+            let result = state_clickhouse::handle_clickhouse(&migration, &ctx).await;
+            record_branch_metrics(&result, &name, &namespace, _start_time);
+            return result;
+        }
+        _ => {}
     }
 
     // Get current phase
@@ -209,6 +209,26 @@ async fn reconcile_migration(
     }
 
     result
+}
+
+/// Record reconciliation success/error metrics for an in-process source branch
+/// (direct / clickhouse), mirroring the tail of the CNPG state-machine path.
+fn record_branch_metrics(
+    result: &ReconcileResult,
+    name: &str,
+    namespace: &str,
+    start_time: Instant,
+) {
+    let _duration = start_time.elapsed().as_secs_f64();
+    match result {
+        Ok(_) => metrics::record_reconciliation("success"),
+        Err(e) => {
+            metrics::record_reconciliation("error");
+            metrics::ERRORS_TOTAL
+                .with_label_values(&[name, namespace, e.category()])
+                .inc();
+        }
+    }
 }
 
 /// Error policy - determines how to handle reconciliation errors

@@ -670,6 +670,7 @@ mod tests {
                         database: Some("mydb".to_string()),
                     }),
                     direct_ref: None,
+                    clickhouse_ref: None,
                 },
                 migrator: Some(MigratorSpec {
                     name: None,
